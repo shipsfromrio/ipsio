@@ -149,6 +149,19 @@ Mac e a agenda estiverem no mesmo fuso.
 | `CALENDAR_ME` | vazio | seu e-mail na agenda, para pular o que você recusou |
 | `CALENDAR_LINK_ONLY` | `1` | `0` grava também evento do iCal sem link |
 | `CALENDAR_COMMAND` | vazio | fonte por comando (acima) |
+| `POST_RECORDING` | vazio | comando rodado depois de cada gravação salva, com o `.mkv` em `$1` (veja abaixo) |
+
+### Depois de cada gravação
+
+Toda gravação salva ganha, ao lado, um arquivo `.sha256` no formato que o
+`shasum -a 256 -c` confere: prova de que o arquivo não foi alterado depois.
+Em seguida, se houver `POST_RECORDING`, ele roda com o arquivo em `$1`; é por
+aqui que entram a transcrição ou a cópia para outro disco. Os dois rodam em
+segundo plano, com a saída em `~/.ipsio/post-recording.log` (com o código de
+saída); um comando que falha nunca mexe no vídeo, e parar a gravação nunca
+espera por eles.
+
+    POST_RECORDING='~/bin/transcrever.sh'
 
 As chaves ficam em inglês nas duas línguas; o menu e as mensagens trocam.
 

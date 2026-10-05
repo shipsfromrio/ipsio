@@ -152,6 +152,18 @@ menu. It is right as long as the Mac and the calendar share a time zone.
 | `CALENDAR_ME` | empty | your calendar e-mail, to skip what you declined |
 | `CALENDAR_LINK_ONLY` | `1` | `0` also records iCal events without a link |
 | `CALENDAR_COMMAND` | empty | command source (above) |
+| `POST_RECORDING` | empty | command run after each saved recording, with the `.mkv` as `$1` (see below) |
+
+### After each recording
+
+Every saved recording gets, next to it, a `.sha256` file in the format that
+`shasum -a 256 -c` checks: evidence that the file was not changed afterwards.
+Then, if `POST_RECORDING` is set, it runs with the file as `$1`; transcription
+or a copy to another disk plug in here. Both run in the background, with their
+output in `~/.ipsio/post-recording.log` (with the exit code); a failing command
+never touches the video, and stopping a recording never waits for them.
+
+    POST_RECORDING='~/bin/transcribe.sh'
 
 ## Permissions and signing
 

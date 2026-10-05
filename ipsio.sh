@@ -302,6 +302,28 @@ track_mean() {
 # space, colon, comma, quote or bracket changes its meaning.
 safe_path() { case "$1" in *[\ :,\;\'\"\[\]\\]*) return 1;; esac; return 0; }
 # restore_output: the system output goes back to where it was.
+# after_save <file>: once a recording is saved, in the background, its SHA-256
+# next to it (<file>.sha256, "shasum -c" format: evidence that the file was not
+# changed afterwards) and then the POST_RECORDING hook from the conf, with the
+# file as $1 (transcription and the like plug in here). Every descriptor goes
+# to the log: the app reads stop's output to the end, and a child holding that
+# pipe would freeze it for as long as the hash or the hook runs. A failing
+# hook never touches the video.
+sha256_of() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1"; else sha256sum "$1"; fi 2>/dev/null | awk '{print $1}'; }
+after_save() {
+  local f="$1"
+  (
+    sum=$(sha256_of "$f")
+    if [ -n "$sum" ]; then printf '%s  %s\n' "$sum" "$(basename "$f")" > "$f.sha256.tmp" && mv -f "$f.sha256.tmp" "$f.sha256"; fi
+    if [ -n "${POST_RECORDING:-}" ]; then
+      echo "$(date '+%F %T') POST_RECORDING $f"
+      bash -c "$POST_RECORDING \"\$1\"" ipsio-hook "$f"
+      rc=$?   # before the $(date) below, which resets $?
+      echo "$(date '+%F %T') POST_RECORDING rc=$rc"
+    fi
+  ) < /dev/null >> "$DIR/post-recording.log" 2>&1 &
+}
+
 restore_output() { local o; o=$(output_to_restore); [ -n "$o" ] && SwitchAudioSource -t output -s "$o" >/dev/null 2>&1; }
 
 # doctor: checks the whole setup WITHOUT recording and without stopping at the
@@ -532,6 +554,7 @@ case "$1" in
       if [ -z "$D" ] || awk "BEGIN{exit !(${D:-0} <= 0)}"; then
         t does_not_open "$(basename "$A")" "$(size_of "$A")"; echo ""; t detail "$(t detail_stop "$(SwitchAudioSource -c -t output)")"; state verdict=DOES_NOT_OPEN file="$A"; exit 1
       fi
+      after_save "$A"
       t "$TIT"
       t saved_body "$(basename "$A")" "$DUR" "$(size_of "$A")" "$SND" "$(dirname "$A")"
       echo ""

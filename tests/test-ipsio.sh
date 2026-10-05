@@ -166,6 +166,35 @@ has "stop summarizes the microphone" "$S" "microphone=OK"
 same "stop restores the sound output" "$(cat "$STUB/current_output")" "MacBook Pro Speakers"
 [ -f "$ROOT/home/.ipsio/pid" ] && fail "stop removes the pid file" || ok "stop removes the pid file"
 
+# ------------------------------------------ after the save: hash and hook ---
+# The app reads stop's output to the end: a hash or hook still holding that
+# pipe would freeze it. The hook here sleeps on purpose; stop must not wait.
+scenario
+printf '#!/bin/bash\nsleep 6; printf %%s "$1" > "%s/hook-arg"\n' "$ROOT" > "$ROOT/hook.sh"; chmod +x "$ROOT/hook.sh"; rm -f "$ROOT/hook-arg"
+conf "POST_RECORDING='$ROOT/hook.sh'"
+run start >/dev/null; S=$(run stop)
+if [ -e "$ROOT/hook-arg" ]; then fail "stop returns without waiting for the hook"; else ok "stop returns without waiting for the hook"; fi
+F=$(printf '%s\n' "$S" | sed -n 's/^#state .* file=//p')
+for _ in $(seq 1 40); do [ -e "$ROOT/hook-arg" ] && break; sleep 0.5; done
+same "the hook gets the recording as \$1" "$(cat "$ROOT/hook-arg" 2>/dev/null)" "$F"
+same "the .sha256 next to the recording matches it" "$(cat "$F.sha256" 2>/dev/null)" "$(openssl dgst -sha256 -r "$F" | awk '{print $1}')  $(basename "$F")"
+has "the hook run is logged" "$(cat "$ROOT/home/.ipsio/post-recording.log")" "POST_RECORDING rc=0"
+
+scenario; conf "POST_RECORDING='false'"
+run start >/dev/null; S=$(run stop)
+F=$(printf '%s\n' "$S" | sed -n 's/^#state .* file=//p')
+for _ in $(seq 1 20); do grep -q 'rc=' "$ROOT/home/.ipsio/post-recording.log" 2>/dev/null && break; sleep 0.5; done
+has "a failing hook is logged" "$(cat "$ROOT/home/.ipsio/post-recording.log")" "POST_RECORDING rc=1"
+same "a failing hook leaves the video alone" "$(cat "$F")" "mkv"
+[ -s "$F.sha256" ] && ok "the hash is written even when the hook fails" || fail "the hash is written even when the hook fails"
+
+scenario
+run start >/dev/null; S=$(run stop)
+F=$(printf '%s\n' "$S" | sed -n 's/^#state .* file=//p')
+for _ in $(seq 1 20); do [ -s "$F.sha256" ] && break; sleep 0.5; done
+[ -s "$F.sha256" ] && ok "without a hook the hash is still written" || fail "without a hook the hash is still written"
+grep -q POST_RECORDING "$ROOT/home/.ipsio/post-recording.log" 2>/dev/null && fail "no hook configured, nothing run" || ok "no hook configured, nothing run"
+
 # ------------------------------------------ meeting, digitally silent mic ---
 scenario; conf "MODE='meeting'"; echo "-inf" > "$STUB/mic"
 S=$(run start)

@@ -48,9 +48,11 @@ transcriber (a folder watcher, for example), the hook is the same:
 
 ### Hook
 
-`POST_RECORDING='command'` in the conf: the app runs the command after each
-saved recording, with the `.mkv` path as argument, in the background, and logs
-the output to `~/.ipsio/post-recording.log`. A failing command never touches
+Built (05/10/2026). `POST_RECORDING='command'` in the conf: `ipsio.sh stop`
+runs the command after each saved recording (manual, calendar or Terminal
+alike), after writing the `.sha256` evidence file, with the `.mkv` path as `$1`,
+in the background, and logs the output and exit code to
+`~/.ipsio/post-recording.log`. A failing command never touches
 the video. Both the built-in transcription and any outside transcriber plug in
 through this hook.
 
