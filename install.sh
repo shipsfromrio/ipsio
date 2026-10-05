@@ -53,7 +53,6 @@ echo "== check =="
 bash ipsio.sh doctor || true
 echo
 echo "Done. Left to do, once:"
-echo "  1. allow Microphone and Screen Recording when Ipsio asks;"
+echo "  1. in the 'Set up Ipsio' window, click the button on each red line until all are green;"
 echo "  2. in Zoom/Teams, pick the speaker '$DEVICE';"
-echo "  3. optional: in the Ipsio menu, 'Connect calendar…' to record meetings by themselves;"
-echo "  4. in the Ipsio menu, 'Check setup', then 'Test now (20 s)'."
+echo "  3. in that window, 'Test now (20 s)'."

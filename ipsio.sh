@@ -309,16 +309,18 @@ restore_output() { local o; o=$(output_to_restore); [ -n "$o" ] && SwitchAudioSo
 # Same checks as the start preflight (one source of truth: the same functions
 # and the same text keys). Exits 0 only when nothing required is missing.
 # Calendar is optional and never counts as missing.
+# The #state line names every item checked, by key: missing=a,b and ok=c,d.
+# The app's setup window draws its checklist from those two lists.
 doctor() {
-  local miss="" out="" VID AUD MICN MICI FREE PERM cal=""
+  local miss="" okk="" out="" VID AUD MICN MICI FREE PERM cal=""
   bad() { miss="${miss:+$miss,}$1"; out="$out$(printf 'X   %s' "$(t "$2" "${3:-}" | sed -n 2p)")"$'\n'; }
-  good() { out="$out$(t doctor_item "$1")"$'\n'; }
-  safe_path "$DIR" || bad dir invalid_dir
+  good() { okk="${okk:+$okk,}$1"; out="$out$(t doctor_item "$2")"$'\n'; }
+  if safe_path "$DIR"; then good dir "$DIR"; else bad dir invalid_dir; fi
   if command -v ffmpeg >/dev/null 2>&1; then
-    good ffmpeg
+    good ffmpeg ffmpeg
     AUD=$(index audio "BlackHole 2ch"); VID=$(index video "Capture screen 0")
-    if [ -n "$AUD" ]; then good "BlackHole 2ch"; else bad blackhole no_blackhole; fi
-    if [ -n "$VID" ]; then good "Capture screen 0"; else bad screen no_screen; fi
+    if [ -n "$AUD" ]; then good blackhole "BlackHole 2ch"; else bad blackhole no_blackhole; fi
+    if [ -n "$VID" ]; then good screen "Capture screen 0"; else bad screen no_screen; fi
     # Without SwitchAudioSource and with no MICROPHONE set, the input cannot be
     # known: that item is reported below, not as a fake microphone problem.
     if [ "$MODE" = "meeting" ] && { [ -n "$MIC" ] || command -v SwitchAudioSource >/dev/null 2>&1; }; then
@@ -326,28 +328,28 @@ doctor() {
       case "$MICN" in
         BlackHole*|"$DEVICE") bad microphone microphone_is_blackhole "$MICN";;
         *) [ -n "$MICN" ] && MICI=$(index audio "$MICN")
-           if [ -n "$MICI" ]; then good "$MICN"; else bad microphone no_microphone "$MICN"; fi;;
+           if [ -n "$MICI" ]; then good microphone "$MICN"; else bad microphone no_microphone "$MICN"; fi;;
       esac
     fi
   else
     bad ffmpeg no_ffmpeg
   fi
   if command -v SwitchAudioSource >/dev/null 2>&1; then
-    good SwitchAudioSource
-    if SwitchAudioSource -a -t output | grep -qxF "$DEVICE"; then good "$DEVICE"; else bad device missing_device; fi
+    good switchaudio SwitchAudioSource
+    if SwitchAudioSource -a -t output | grep -qxF "$DEVICE"; then good device "$DEVICE"; else bad device missing_device; fi
   else
     bad switchaudio no_switchaudio
   fi
   if mkdir -p "$FOLDER" 2>/dev/null; then
-    good "$FOLDER"
+    good folder "$FOLDER"
     FREE=$(free_gb)
-    if [ -n "$FREE" ] && [ "$FREE" -lt "$MIN_GB" ]; then bad disk disk_full "$FREE"; else good "${FREE:-?} GB"; fi
+    if [ -n "$FREE" ] && [ "$FREE" -lt "$MIN_GB" ]; then bad disk disk_full "$FREE"; else good disk "${FREE:-?} GB"; fi
   else
     bad folder folder_inaccessible
   fi
   PERM="${TMPDIR:-/tmp}/ipsio-perm-$$.png"; rm -f "$PERM"
   screencapture -x -t png "$PERM" 2>/dev/null
-  if [ -s "$PERM" ]; then good "screen permission"; else bad permission no_permission; fi
+  if [ -s "$PERM" ]; then good permission "screen permission"; else bad permission no_permission; fi
   rm -f "$PERM"
   [ -s "$DIR/calendar.url" ] && cal="${cal:+$cal,}ics"
   [ -s "$DIR/calendar.txt" ] && cal="${cal:+$cal,}list"
@@ -356,8 +358,8 @@ doctor() {
   echo
   printf '%s' "$out"
   if [ -n "$cal" ]; then t doctor_calendar "$cal"; else t doctor_calendar_none; fi
-  if [ -n "$miss" ]; then state verdict=SETUP_INCOMPLETE mode="$MODE" missing="$miss" calendar="${cal:-none}"; return 1; fi
-  state verdict=SETUP_OK mode="$MODE" missing= calendar="${cal:-none}"
+  if [ -n "$miss" ]; then state verdict=SETUP_INCOMPLETE mode="$MODE" missing="$miss" ok="$okk" calendar="${cal:-none}"; return 1; fi
+  state verdict=SETUP_OK mode="$MODE" missing= ok="$okk" calendar="${cal:-none}"
 }
 
 main() {

@@ -47,22 +47,32 @@ app, which comes back by itself at every login. It asks for the Mac's password
 three times (driver, audio reload, certificate). It refuses to run while a
 recording is in progress.
 
-Then, once:
+Then, once, the **Set up Ipsio** window opens by itself. It lists what Ipsio
+needs, one line each, green or red, and every red line has the one button
+that fixes it:
 
-1. **Permissions.** The app asks for the **Microphone** (one "Allow") and
-   opens the **Screen & System Audio Recording** pane, where you turn on
-   "Ipsio". It notices by itself and reopens. The microphone permission is
-   needed even for classes: BlackHole is an audio input to macOS.
-2. **The meeting app's speaker.** In Zoom: gear, Audio, Speaker = `Ipsio`. In
-   Teams: Settings, Devices. Meet in the browser follows the system output,
-   which Ipsio switches by itself while recording.
-3. **Check.** In the menu, "Check setup" lists, in one pass, everything
-   still missing (ffmpeg, BlackHole, the `Ipsio` device, the microphone in
-   meeting mode, folder, disk, screen permission) and which calendar is
-   connected. From Terminal: `ipsio doctor` (exit 0 only when complete).
-4. **Test.** In the menu, "Test now (20 s)": records, the Mac speaks a
-   sentence, measures, deletes and gives the verdict. In meeting mode it also
-   checks the microphone.
+| Line | The button |
+|---|---|
+| ffmpeg, SwitchAudioSource, BlackHole | **Install**: opens Terminal with the Homebrew command (BlackHole asks for the Mac's password) |
+| Sound output `Ipsio` | **Create**: one click, no password |
+| Screen Recording permission | **Open Settings**: turn on "Ipsio"; the app closes and reopens by itself |
+| Microphone permission | **Allow**. Needed even for classes: BlackHole is an audio input to macOS |
+| Microphone for meeting mode | **Open Sound**, to pick the real microphone |
+| Recordings folder, disk space | **Choose folder** |
+| Calendar (optional) | **Connect** |
+
+The list checks itself again every few seconds, so a line turns green as soon
+as it is fixed, wherever it was fixed. When every required line is green, it
+offers **Test now (20 s)**: records, the Mac speaks a sentence, measures,
+deletes and gives the verdict (in meeting mode it also checks the microphone).
+
+One step only you can do: in Zoom, gear, Audio, Speaker = `Ipsio`; in Teams,
+Settings, Devices. Meet in the browser follows the system output, which Ipsio
+switches by itself while recording.
+
+The window opens again at launch whenever something required goes missing,
+and any time from the menu, **Check setup**. From Terminal: `ipsio doctor`
+(exit 0 only when complete).
 
 ## Use
 

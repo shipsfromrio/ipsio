@@ -45,21 +45,32 @@ mantém as permissões entre atualizações e liga o app de barra de menus, que
 volta sozinho a cada login. Pede a senha do Mac três vezes (driver, recarga do
 áudio, certificado). Recusa rodar com gravação em andamento.
 
-Depois, uma vez:
+Depois, uma vez, a janela **Configurar o Ipsio** abre sozinha. Ela lista o que
+o Ipsio precisa, uma linha por item, verde ou vermelha, e cada linha vermelha
+tem o botão que resolve:
 
-1. **Permissões.** O app pede o **Microfone** (um "Permitir") e abre o painel
-   de **Gravação de Tela e Áudio do Sistema**, onde você liga "Ipsio". Ele
-   percebe sozinho e reabre. A de microfone vale até para aula: o BlackHole é
-   uma entrada de áudio para o macOS.
-2. **Alto-falante do app de reunião.** No Zoom: engrenagem, Áudio,
-   Alto-falante = `Ipsio`. No Teams: Configurações, Dispositivos. O Meet no
-   navegador segue a saída do sistema, que o Ipsio troca sozinho ao gravar.
-3. **Conferência.** No menu, "Conferir a instalação" lista de uma vez tudo que
-   ainda falta (ffmpeg, BlackHole, o dispositivo `Ipsio`, o microfone no modo
-   reunião, pasta, disco, permissão de tela) e qual agenda está conectada. No
-   Terminal: `ipsio doctor` (sai 0 só com tudo completo).
-4. **Teste.** No menu, "Testar agora (20 s)": grava, o Mac fala uma frase,
-   mede, apaga e dá o veredito. No modo reunião confere também o microfone.
+| Linha | O botão |
+|---|---|
+| ffmpeg, SwitchAudioSource, BlackHole | **Instalar**: abre o Terminal com o comando do Homebrew (o BlackHole pede a senha do Mac) |
+| Saída de som `Ipsio` | **Criar**: um clique, sem senha |
+| Permissão de Gravação de Tela | **Abrir Ajustes**: ligue "Ipsio"; o app fecha e reabre sozinho |
+| Permissão de Microfone | **Permitir**. Vale até para aula: o BlackHole é uma entrada de áudio para o macOS |
+| Microfone do modo reunião | **Abrir Som**, para escolher o microfone de verdade |
+| Pasta das gravações, espaço em disco | **Escolher pasta** |
+| Agenda (opcional) | **Conectar** |
+
+A lista se confere de novo a cada poucos segundos: a linha fica verde assim que
+o item fica pronto, onde quer que tenha sido resolvido. Com tudo verde, ela
+oferece **Testar agora (20 s)**: grava, o Mac fala uma frase, mede, apaga e dá o
+veredito (no modo reunião confere também o microfone).
+
+Um passo só você faz: no Zoom, engrenagem, Áudio, Alto-falante = `Ipsio`; no
+Teams, Configurações, Dispositivos. O Meet no navegador segue a saída do
+sistema, que o Ipsio troca sozinho ao gravar.
+
+A janela volta a abrir sozinha sempre que falta algo obrigatório, e a qualquer
+hora pelo menu, **Conferir a instalação**. No Terminal: `ipsio doctor` (sai 0 só
+com tudo completo).
 
 ## Usar
 

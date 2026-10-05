@@ -71,14 +71,17 @@ echo "== building =="
 # Into a temporary folder first: a failed build must not leave the KeepAlive
 # LaunchAgent pointing at a deleted binary.
 B=$(mktemp -d)
-swiftc -O -parse-as-library app/Schedule.swift app/Ipsio.swift -framework AppKit -o "$B/Ipsio" 2>&1 | grep -v warning || true
+swiftc -O -parse-as-library app/Schedule.swift app/Setup.swift app/SetupWindow.swift app/Ipsio.swift -framework AppKit -o "$B/Ipsio" 2>&1 | grep -v warning || true
 swiftc -O -parse-as-library app/Schedule.swift app/CalendarCLI.swift -o "$B/ipsio-calendar" 2>&1 | grep -v warning || true
-[ -x "$B/Ipsio" ] && [ -x "$B/ipsio-calendar" ] || { rm -rf "$B"; echo "build failed; the installed app was left as it was"; exit 1; }
-mv -f "$B/Ipsio" "$B/ipsio-calendar" "$APP/Contents/MacOS/" && rm -rf "$B"
+# Inside the app, so the setup window's "Create" button needs no Terminal.
+swiftc -O tools/create-device.swift -o "$B/create-device" 2>&1 | grep -v warning || true
+[ -x "$B/Ipsio" ] && [ -x "$B/ipsio-calendar" ] && [ -x "$B/create-device" ] || { rm -rf "$B"; echo "build failed; the installed app was left as it was"; exit 1; }
+mv -f "$B/Ipsio" "$B/ipsio-calendar" "$B/create-device" "$APP/Contents/MacOS/" && rm -rf "$B"
 echo "== signing =="
 if security find-identity -p codesigning 2>/dev/null | grep -q "\"$IDENT\""; then SIGN="$IDENT"
 else SIGN="-"; echo "WARNING: no '$IDENT' certificate, signing ad hoc; permissions are lost on every rebuild. Run: bash certificate.sh"; fi
 codesign -s "$SIGN" --force -i "$BID.calendar" "$APP/Contents/MacOS/ipsio-calendar" 2>&1 | grep -v "replacing existing" || true
+codesign -s "$SIGN" --force -i "$BID.create-device" "$APP/Contents/MacOS/create-device" 2>&1 | grep -v "replacing existing" || true
 codesign -s "$SIGN" --force "$APP" 2>&1 | grep -v "replacing existing" || true
 codesign --verify --strict "$APP" || { echo "invalid signature"; exit 1; }
 codesign -dr - "$APP" 2>&1 | tail -1

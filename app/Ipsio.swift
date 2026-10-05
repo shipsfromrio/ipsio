@@ -120,9 +120,6 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "mode_meeting_mic": "Reunião (som do computador + %@)", "class": "Aula", "meeting": "Reunião",
             "language": "Switch to English  🇺🇸", "restart": "Reiniciar o app", "quit": "Sair (até o próximo login)",
             "waiting": "Aguardando a permissão de Gravação de Tela…",
-            "onboard_title": "O Ipsio precisa gravar a tela",
-            "onboard_body": "Abri Ajustes do Sistema > Privacidade e Segurança > Gravação de Tela e Áudio do Sistema. Ligue \"Ipsio\" na lista (se já aparecer ligado, remova com \"−\" e ligue de novo). O app reabre sozinho assim que a permissão entrar.",
-            "open_settings": "Abrir Ajustes",
             "recording": "GRAVANDO", "measuring": "medindo o som", "disk": "disco para %@ h",
             "silent_for": "GRAVANDO SEM SOM há %@ s", "alarm_title": "SEM SOM HÁ %@ SEGUNDOS",
             "mic_dead_for": "MICROFONE MUDO há %@ s", "mic_alarm_title": "MICROFONE MUDO HÁ %@ SEGUNDOS",
@@ -159,6 +156,28 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "connect_fail_title": "A agenda não foi conectada", "connect_fail_body": "%@\n\nNada foi trocado: continua valendo a agenda anterior, se havia uma.",
             "connect_button": "Conectar",
             "connect_replaces": "Atenção: hoje há %@ endereços em calendar.url, e este substitui todos.",
+            "setup_title": "Configurar o Ipsio",
+            "setup_intro": "O Ipsio precisa destes itens para gravar. Cada linha fica verde sozinha quando ficar pronta: pode resolver na ordem que quiser.",
+            "setup_zoom": "Falta só você, uma vez: no Zoom, Teams ou Meet, escolha o alto-falante \"%@\".",
+            "setup_close": "Fechar", "setup_checking": "Conferindo…", "setup_missing": "falta",
+            "setup_ready": "Tudo pronto. Faça um teste de 20 s.", "setup_left_one": "Falta 1 item.", "setup_left": "Faltam %@ itens.",
+            "setup_script": "O gravador respondeu", "setup_script_hint": "O app não conseguiu rodar o ipsio.sh. Instale de novo com o install.sh.",
+            "setup_dir": "Pasta de configuração", "setup_dir_hint": "A pasta do Ipsio tem um caractere que ele não aceita (espaço, dois-pontos, vírgula). Aponte IPSIO_DIR para um caminho simples.",
+            "setup_ffmpeg": "ffmpeg, o gravador", "setup_ffmpeg_hint": "Instala pelo Homebrew, sem senha.",
+            "setup_switchaudio": "SwitchAudioSource, que troca a saída de som", "setup_switchaudio_hint": "Instala pelo Homebrew, sem senha.",
+            "setup_blackhole": "BlackHole, que capta o som do computador", "setup_blackhole_hint": "Instala pelo Homebrew e pede a senha do Mac. Se não aparecer depois, reinicie o Mac.",
+            "setup_device": "Saída de som \"%@\"", "setup_device_hint": "Toca no seu alto-falante e manda o mesmo som para o gravador. Um clique cria.",
+            "setup_screen": "Tela visível para o gravador", "setup_screen_hint": "O ffmpeg não encontrou a tela. Reinicie o Mac e confira de novo.",
+            "setup_screen_permission": "Permissão de Gravação de Tela", "setup_screen_permission_hint": "Em Ajustes, ligue \"Ipsio\" na lista. O app fecha quando a permissão entrar e volta sozinho (se não voltar, abra o Ipsio de novo).",
+            "setup_mic_permission": "Permissão de Microfone", "setup_mic_permission_hint": "O som do computador entra pelo BlackHole, que o macOS trata como microfone; e a reunião grava a sua voz.",
+            "setup_microphone": "Microfone do modo reunião", "setup_microphone_hint": "Escolha o microfone de verdade em Som > Entrada, ou mude para o modo aula no menu.",
+            "setup_folder": "Pasta das gravações", "setup_folder_hint": "Não consegui criar a pasta. Escolha outra.",
+            "setup_disk": "Espaço em disco", "setup_disk_hint": "Pouco espaço: uma hora de gravação ocupa cerca de 2 GB. Libere espaço ou escolha uma pasta em outro disco.",
+            "setup_other": "Outro item", "setup_other_hint": "O ipsio.sh acusou um item que esta janela ainda não conhece. Rode ipsio doctor no Terminal para ver qual.",
+            "setup_calendar": "Agenda (opcional)", "setup_calendar_hint": "Conecte a sua agenda para o Ipsio gravar as reuniões sozinho.",
+            "fix_install": "Instalar", "fix_create": "Criar", "fix_settings": "Abrir Ajustes", "fix_allow": "Permitir",
+            "fix_sound": "Abrir Som", "fix_folder": "Escolher pasta", "fix_calendar": "Conectar",
+            "device_failed": "Não consegui criar a saída de som", "device_failed_body": "Rode o install.sh no Terminal, ou crie em Configuração de Áudio e MIDI um dispositivo de saída múltipla chamado \"%@\".",
         ]
         let en: [String: String] = [
             "stopped": "Stopped", "stopped_no_perm": "Stopped · Screen Recording permission missing",
@@ -172,9 +191,6 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "mode_meeting_mic": "Meeting (computer sound + %@)", "class": "Class", "meeting": "Meeting",
             "language": "Mudar para português  🇧🇷", "restart": "Restart the app", "quit": "Quit (until next login)",
             "waiting": "Waiting for the Screen Recording permission…",
-            "onboard_title": "Ipsio needs to record the screen",
-            "onboard_body": "I opened System Settings > Privacy & Security > Screen & System Audio Recording. Turn on \"Ipsio\" in the list (if it already shows as on, remove it with \"−\" and turn it on again). The app reopens by itself as soon as the permission is in.",
-            "open_settings": "Open Settings",
             "recording": "RECORDING", "measuring": "measuring sound", "disk": "disk for %@ h",
             "silent_for": "RECORDING WITHOUT SOUND for %@ s", "alarm_title": "NO SOUND FOR %@ SECONDS",
             "mic_dead_for": "MICROPHONE DEAD for %@ s", "mic_alarm_title": "MICROPHONE DEAD FOR %@ SECONDS",
@@ -211,6 +227,28 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "connect_fail_title": "The calendar was not connected", "connect_fail_body": "%@\n\nNothing was replaced: the previous calendar, if any, still applies.",
             "connect_button": "Connect",
             "connect_replaces": "Note: calendar.url holds %@ addresses today, and this one replaces all of them.",
+            "setup_title": "Set up Ipsio",
+            "setup_intro": "Ipsio needs these to record. Each line turns green by itself once it is ready, so fix them in any order.",
+            "setup_zoom": "One thing only you can do, once: in Zoom, Teams or Meet, pick the speaker \"%@\".",
+            "setup_close": "Close", "setup_checking": "Checking…", "setup_missing": "missing",
+            "setup_ready": "All set. Run a 20 s test.", "setup_left_one": "1 item left.", "setup_left": "%@ items left.",
+            "setup_script": "The recorder answered", "setup_script_hint": "The app could not run ipsio.sh. Install again with install.sh.",
+            "setup_dir": "Settings folder", "setup_dir_hint": "Ipsio's folder has a character it cannot use (space, colon, comma). Point IPSIO_DIR to a simple path.",
+            "setup_ffmpeg": "ffmpeg, the recorder", "setup_ffmpeg_hint": "Installs through Homebrew, no password.",
+            "setup_switchaudio": "SwitchAudioSource, which switches the sound output", "setup_switchaudio_hint": "Installs through Homebrew, no password.",
+            "setup_blackhole": "BlackHole, which captures the computer sound", "setup_blackhole_hint": "Installs through Homebrew and asks for the Mac's password. If it does not show up afterwards, restart the Mac.",
+            "setup_device": "Sound output \"%@\"", "setup_device_hint": "Plays on your speaker and sends the same sound to the recorder. One click creates it.",
+            "setup_screen": "Screen visible to the recorder", "setup_screen_hint": "ffmpeg did not find the screen. Restart the Mac and check again.",
+            "setup_screen_permission": "Screen Recording permission", "setup_screen_permission_hint": "In Settings, turn on \"Ipsio\" in the list. The app closes once the permission is in and comes back by itself (if it does not, open Ipsio again).",
+            "setup_mic_permission": "Microphone permission", "setup_mic_permission_hint": "Computer sound comes in through BlackHole, which macOS treats as a microphone; and meetings record your voice.",
+            "setup_microphone": "Microphone for meeting mode", "setup_microphone_hint": "Pick the real microphone in Sound > Input, or switch to class mode in the menu.",
+            "setup_folder": "Recordings folder", "setup_folder_hint": "Could not create the folder. Pick another one.",
+            "setup_disk": "Disk space", "setup_disk_hint": "Low on space: an hour of recording takes about 2 GB. Free some space or pick a folder on another disk.",
+            "setup_other": "Another item", "setup_other_hint": "ipsio.sh reported an item this window does not know yet. Run ipsio doctor in Terminal to see which.",
+            "setup_calendar": "Calendar (optional)", "setup_calendar_hint": "Connect your calendar so Ipsio records meetings by itself.",
+            "fix_install": "Install", "fix_create": "Create", "fix_settings": "Open Settings", "fix_allow": "Allow",
+            "fix_sound": "Open Sound", "fix_folder": "Choose folder", "fix_calendar": "Connect",
+            "device_failed": "Could not create the sound output", "device_failed_body": "Run install.sh in Terminal, or create a multi-output device named \"%@\" in Audio MIDI Setup.",
         ]
         return (lang == "pt" ? pt : en)[k] ?? k
     }
@@ -289,21 +327,18 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             AVCaptureDevice.requestAccess(for: .audio) { _ in DispatchQueue.main.async { self.refresh() } }
         }
         if !CGPreflightScreenCaptureAccess() { askScreenPermission() }
+        openSetupIfNeeded()
     }
 
+    /// Without the screen permission the app waits for it (tick reopens the app
+    /// when it comes in). The explanation and the button live in the setup
+    /// window, which opens right after this; no popup on top of it.
     func askScreenPermission() {
         waitingPermission = true
         CGRequestScreenCaptureAccess()          // puts the app in the Settings list
-        doScreenPermission()                    // opens the right pane
         icon("exclamationmark.circle", color: .systemYellow)
         statusItem.title = t("waiting")
         recordItem.isEnabled = false; testItem.isEnabled = false
-        modal({
-            let a = NSAlert()
-            a.messageText = self.t("onboard_title"); a.informativeText = self.t("onboard_body")
-            a.addButton(withTitle: self.t("ok")); a.addButton(withTitle: self.t("open_settings"))
-            return a
-        }) { if $0 == .alertSecondButtonReturn { self.doScreenPermission() } }
     }
 
     func micOk() -> Bool { AVCaptureDevice.authorizationStatus(for: .audio) == .authorized }
@@ -815,6 +850,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         }
     }
     @objc func doTest() {
+        // A second click (or Return in the setup window) during a test would
+        // finish fast with ALREADY_RECORDING and clear busy under the first one.
+        guard !busy else { return }
         guard permissionsOk(explain: true) else { refresh(); return }
         busy = true; refresh()
         statusItem.title = t("testing")
@@ -874,10 +912,77 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             var c = readConf(); c["RECORDINGS_DIR"] = u.path; writeConf(c); refresh()
         }
     }
-    @objc func doDoctor() {
+    @objc func doDoctor() { setup.show() }
+
+    // ---- first-run window ----
+    lazy var setup: SetupWindow = {
+        let w = SetupWindow(app: self)
+        w.onComplete = { [weak self] in
+            guard let self = self else { return }
+            FileManager.default.createFile(atPath: self.setupDonePath, contents: Data())
+        }
+        return w
+    }()
+    var setupDonePath: String { dir + "/setup-done" }
+    func deviceName() -> String { let d = readConf()["OUTPUT_DEVICE"] ?? ""; return d.isEmpty ? "Ipsio" : d }
+
+    /// At launch: the window opens on the first run, and on any later launch
+    /// where something required is missing (a driver removed, a permission
+    /// revoked). A complete setup that was already seen opens nothing.
+    func openSetupIfNeeded() {
+        let firstRun = !FileManager.default.fileExists(atPath: setupDonePath)
         DispatchQueue.global().async {
             let r = self.run("doctor")
-            self.alertFromScript(r, title: self.t("doctor_title"))
+            DispatchQueue.main.async {
+                let items = Setup.items(state: Setup.parseState(r), screenPermission: CGPreflightScreenCaptureAccess(), micPermission: self.micOk())
+                if firstRun || !Setup.complete(items) { self.setup.show() }
+            }
+        }
+    }
+
+    static func fixLabel(_ f: SetupFix) -> String {
+        switch f {
+        case .terminal: return "fix_install"
+        case .createDevice: return "fix_create"
+        case .screenSettings: return "fix_settings"
+        case .micPermission: return "fix_allow"
+        case .soundInput: return "fix_sound"
+        case .chooseFolder: return "fix_folder"
+        case .connectCalendar: return "fix_calendar"
+        case .none: return ""
+        }
+    }
+
+    func applyFix(_ f: SetupFix) {
+        switch f {
+        case .terminal(let cmd):
+            // A .command file opens in Terminal with no Automation permission
+            // (osascript to Terminal would ask for one more).
+            // A failed write must not open a previous fix.command (another command).
+            let path = dir + "/fix.command"
+            try? FileManager.default.removeItem(atPath: path)
+            guard (try? Setup.terminalScript(cmd).write(toFile: path, atomically: true, encoding: .utf8)) != nil else {
+                alert(t("setup_title"), path); return
+            }
+            chmod(path, 0o700)
+            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+        case .createDevice:
+            let name = deviceName()
+            let tool = Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("create-device").path ?? ""
+            guard FileManager.default.isExecutableFile(atPath: tool) else { alert(t("device_failed"), t("device_failed_body", name)); return }
+            DispatchQueue.global().async {
+                let p = Process(); p.executableURL = URL(fileURLWithPath: tool); p.arguments = [name]
+                p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
+                let ok = (try? p.run()) != nil && { p.waitUntilExit(); return p.terminationStatus == 0 }()
+                if !ok { self.alert(self.t("device_failed"), self.t("device_failed_body", name)) }
+            }
+        case .screenSettings: CGRequestScreenCaptureAccess(); doScreenPermission()
+        case .micPermission: doMicPermission()
+        case .soundInput:
+            if let u = URL(string: "x-apple.systempreferences:com.apple.preference.sound?input") { NSWorkspace.shared.open(u) }
+        case .chooseFolder: doFolder()
+        case .connectCalendar: doConnectCalendar()
+        case .none: break
         }
     }
     /// Connect calendar: the address goes into a secure field (it is a

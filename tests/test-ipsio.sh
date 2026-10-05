@@ -243,7 +243,8 @@ run stop >/dev/null
 # and its exit code tells a complete setup from an incomplete one.
 scenario
 D=$(run doctor); rc=$?
-has "doctor on a good Mac is SETUP_OK" "$D" "verdict=SETUP_OK mode=class missing= calendar=none"
+has "doctor on a good Mac is SETUP_OK" "$D" "verdict=SETUP_OK mode=class missing= ok="
+has "doctor names every item it found OK, by key" "$D" "ok=dir,ffmpeg,blackhole,screen,switchaudio,device,folder,disk,permission calendar=none"
 same "doctor on a good Mac exits 0" "$rc" "0"
 if [ -e "$ROOT/home/.ipsio/pid" ] || [ -e "$STUB/ffmpeg-args" ]; then fail "doctor records nothing"; else ok "doctor records nothing"; fi
 
@@ -253,6 +254,7 @@ has "doctor refuses a state folder that start would refuse" "$(run doctor IPSIO_
 scenario; sed -i.bak '/BlackHole/d' "$STUB/devices"; touch "$STUB/no_permission"
 D=$(run doctor); rc=$?
 has "doctor lists every missing item, not only the first" "$D" "missing=blackhole,permission"
+has "doctor keeps the found items apart from the missing ones" "$D" "ok=dir,ffmpeg,screen,"
 has "doctor explains the BlackHole item" "$D" "X   O driver de áudio BlackHole"
 has "doctor explains the permission item" "$D" "X   O macOS não deixa"
 same "doctor incomplete exits 1" "$rc" "1"
@@ -261,7 +263,7 @@ scenario; conf "MODE='meeting'"; echo "Headset" > "$STUB/input"
 has "doctor in meeting mode checks the microphone" "$(run doctor)" "missing=microphone"
 
 scenario; conf "MODE='meeting'"
-has "doctor in meeting mode with a good microphone is OK" "$(run doctor)" "verdict=SETUP_OK mode=meeting"
+has "doctor in meeting mode with a good microphone is OK" "$(run doctor)" "verdict=SETUP_OK mode=meeting missing= ok=dir,ffmpeg,blackhole,screen,microphone,"
 
 scenario; printf 'MacBook Pro Speakers\n' > "$STUB/outputs"; echo 3 > "$STUB/free"
 has "doctor checks the output device and the disk" "$(run doctor)" "missing=device,disk"
@@ -325,6 +327,25 @@ BAD=$(awk '/func [A-Za-z]+\(/{ match($0, /func [A-Za-z]+/); f=substr($0, RSTART+
   /runModal\(\)/ && f !~ /^(modal|doTitle|doFolder|doConnectCalendar)$/ { print f ":" NR }' "$APP")
 same "popups open only through modal() or a menu click" "$BAD" ""
 grep -q 'perform(#selector(self.runPendingModal)' "$APP" && ok "modal() opens through perform(selector)" || fail "modal() opens through perform(selector)"
+
+# ------------------------------------------------------------- app texts ---
+# A key repeated in a Swift dictionary literal crashes the app at launch, and a
+# key missing in one language shows the raw key on screen.
+swkeys() { sed -n "/let $1: \[String: String\] = \[/,/^        \]/p" "$APP" | grep -oE '"[a-z][a-zA-Z0-9_]*": "' | sed -E 's/^"//; s/": "$//'; }
+SPT=$(swkeys pt | sort); SEN=$(swkeys en | sort)
+same "app texts: no key repeated in pt" "$(printf '%s\n' "$SPT" | uniq -d)" ""
+same "app texts: no key repeated in en" "$(printf '%s\n' "$SEN" | uniq -d)" ""
+same "app texts: the same keys in pt and en" "$SPT" "$SEN"
+[ "$(printf '%s\n' "$SPT" | wc -l)" -gt 80 ] && ok "app text extraction found the dictionaries" || fail "app text extraction found the dictionaries"
+# Every setup item and every fix button has its text.
+for k in $(grep -oE '"(script|dir|ffmpeg|switchaudio|blackhole|device|screen|screen_permission|mic_permission|microphone|folder|disk|calendar)"' "$HERE/../app/Setup.swift" | tr -d '"' | sort -u); do
+  printf '%s\n' "$SPT" | grep -qx "setup_$k" && printf '%s\n' "$SPT" | grep -qx "setup_${k}_hint" || fail "setup item '$k' has a title and a hint"
+done
+ok "every setup item has a title and a hint"
+for k in $(grep -oE 'return "fix_[a-z]+"' "$APP" | sed -E 's/return "//; s/"$//'); do
+  printf '%s\n' "$SPT" | grep -qx "$k" || fail "fix button '$k' has a text"
+done
+ok "every fix button has a text"
 
 echo
 echo "$((TOTAL-FAILS))/$TOTAL ok"

@@ -26,12 +26,16 @@ jobs:
       - name: build the app, ipsio-calendar and the device creator
         run: |
           swiftc --version
-          swiftc -O -parse-as-library app/Schedule.swift app/Ipsio.swift -framework AppKit -o "$RUNNER_TEMP/Ipsio"
+          swiftc -O -parse-as-library app/Schedule.swift app/Setup.swift app/SetupWindow.swift app/Ipsio.swift -framework AppKit -o "$RUNNER_TEMP/Ipsio"
           swiftc -O -parse-as-library app/Schedule.swift app/CalendarCLI.swift -o "$RUNNER_TEMP/ipsio-calendar"
           swiftc -O tools/create-device.swift -o "$RUNNER_TEMP/create-device"
       - name: calendar bench
         run: |
           swiftc -parse-as-library app/Schedule.swift tests/ScheduleTests.swift -o "$RUNNER_TEMP/schedule-tests"
           "$RUNNER_TEMP/schedule-tests"
+      - name: setup checklist bench
+        run: |
+          swiftc -parse-as-library app/Setup.swift tests/SetupTests.swift -o "$RUNNER_TEMP/setup-tests"
+          "$RUNNER_TEMP/setup-tests"
       - name: mutants (the bench fails a broken calendar)
         run: bash tests/mutants.sh
