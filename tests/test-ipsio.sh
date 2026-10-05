@@ -310,6 +310,8 @@ else has "doctor without SwitchAudioSource blames no microphone" "$D" "missing=s
 scenario; echo "https://example.com/x.ics" > "$ROOT/home/.ipsio/calendar.url"; conf "CALENDAR_COMMAND='true'" "UI_LANGUAGE='en'"
 D=$(run doctor)
 has "doctor reports the connected calendar sources" "$D" "calendar=ics,command"
+scenario; conf "CALENDAR_MACOS='1'"
+has "doctor counts the Mac's Calendar as a source" "$(run doctor)" "calendar=macos"
 lacks "doctor never prints the calendar address" "$D" "example.com"
 has "doctor speaks English when asked" "$D" "SETUP COMPLETE"
 
@@ -353,7 +355,7 @@ same "every key used exists" "$MISSING" ""
 # in an action fired straight by a menu click.
 APP="$HERE/../app/Ipsio.swift"
 BAD=$(awk '/func [A-Za-z]+\(/{ match($0, /func [A-Za-z]+/); f=substr($0, RSTART+5, RLENGTH-5) }
-  /runModal\(\)/ && f !~ /^(modal|doTitle|doFolder|doConnectCalendar)$/ { print f ":" NR }' "$APP")
+  /runModal\(\)/ && f !~ /^(modal|doTitle|doFolder|doConnectCalendar|connectICal)$/ { print f ":" NR }' "$APP")
 same "popups open only through modal() or a menu click" "$BAD" ""
 grep -q 'perform(#selector(self.runPendingModal)' "$APP" && ok "modal() opens through perform(selector)" || fail "modal() opens through perform(selector)"
 

@@ -161,6 +161,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "calendar_stale": "⚠ Agenda sem atualizar desde %@", "calendar_never": "a abertura do app",
             "calendar_stale_title": "A agenda parou de atualizar",
             "calendar_stale_body": "A leitura falha desde %@. O Ipsio segue gravando pela última leitura, mas reunião marcada depois disso não entra. Motivo: %@",
+            "connect_choice_body": "De onde o Ipsio lê as suas reuniões? O Calendário do Mac já tem as contas que você adicionou nele (Google, iCloud, Exchange): basta um \"Permitir\". O endereço iCal serve para uma agenda que não está no Calendário.",
+            "connect_mac": "Calendário do Mac (recomendado)", "connect_ical": "Endereço iCal…",
+            "connect_mac_ok_body": "O Ipsio passa a ler o Calendário do Mac. As reuniões com link aparecem em Próximas gravações em alguns segundos.",
+            "connect_mac_denied": "O macOS não deu acesso aos Calendários. Em Ajustes do Sistema > Privacidade e Segurança > Calendários, ligue \"Ipsio\" e conecte de novo.",
             "setup_title": "Configurar o Ipsio",
             "setup_intro": "O Ipsio precisa destes itens para gravar. Cada linha fica verde sozinha quando ficar pronta: pode resolver na ordem que quiser.",
             "setup_zoom": "Falta só você, uma vez: no Zoom, Teams ou Meet, escolha o alto-falante \"%@\".",
@@ -235,6 +239,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "calendar_stale": "⚠ Calendar not updated since %@", "calendar_never": "the app opened",
             "calendar_stale_title": "The calendar stopped updating",
             "calendar_stale_body": "Reading has failed since %@. Ipsio keeps recording from the last reading, but a meeting added after that will be missed. Reason: %@",
+            "connect_choice_body": "Where should Ipsio read your meetings from? The Mac's Calendar already has the accounts you added to it (Google, iCloud, Exchange): one \"Allow\" is enough. The iCal address is for a calendar that is not in Calendar.",
+            "connect_mac": "Mac's Calendar (recommended)", "connect_ical": "iCal address…",
+            "connect_mac_ok_body": "Ipsio now reads the Mac's Calendar. Meetings with a link show up under Upcoming recordings in a few seconds.",
+            "connect_mac_denied": "macOS did not grant access to Calendars. In System Settings > Privacy & Security > Calendars, turn on \"Ipsio\" and connect again.",
             "setup_title": "Set up Ipsio",
             "setup_intro": "Ipsio needs these to record. Each line turns green by itself once it is ready, so fix them in any order.",
             "setup_zoom": "One thing only you can do, once: in Zoom, Teams or Meet, pick the speaker \"%@\".",
@@ -318,6 +326,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             center.delegate = self
             center.requestAuthorization(options: [.alert, .sound]) { ok, _ in DispatchQueue.main.async { self.notificationsOk = ok } }
         }
+        MacCalendar.install()
         restoreSoundIfStuck()
         skipped = Set(((try? String(contentsOfFile: skipPath, encoding: .utf8)) ?? "").components(separatedBy: "\n").filter { !$0.isEmpty })
         meetings = Sources(dir: dir, conf: readConf()).readCache()
@@ -555,7 +564,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         upcomingItem.title = t("upcoming"); recentItem.title = t("recent"); openItem.title = t("open")
         permItem.title = t("perm"); permScreen.title = t("perm_screen"); permMic.title = t("perm_mic")
         doctorItem.title = t("doctor"); doctorItem.isEnabled = !busy
-        connectItem.title = Sources(dir: dir, conf: readConf()).configured.contains("ics") ? t("connect_again") : t("connect")
+        connectItem.title = Sources(dir: dir, conf: readConf()).configured.contains { $0 == "ics" || $0 == "macos" } ? t("connect_again") : t("connect")
         languageItem.title = t("language"); restartItem.title = t("restart"); quitItem.title = t("quit")
         let c = readConf()
         let title = c["TITLE"] ?? ""
@@ -1010,8 +1019,38 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     /// Connect calendar: the address goes into a secure field (it is a
     /// credential, and the screen may be the very thing being recorded), is
     /// read once, and is saved only if it answered with a calendar.
+    /// Connect calendar: first the choice. The Mac's Calendar is the easy way
+    /// (the accounts are already there, one "Allow"); the iCal address is for
+    /// a calendar that is not in the Calendar app.
     @objc func doConnectCalendar() {
         NSApp.activate(ignoringOtherApps: true)
+        let c = NSAlert()
+        c.messageText = t("connect_title"); c.informativeText = t("connect_choice_body")
+        c.addButton(withTitle: t("connect_mac")); c.addButton(withTitle: t("connect_ical")); c.addButton(withTitle: t("cancel"))
+        switch c.runModal() {
+        case .alertFirstButtonReturn: connectMacCalendar()
+        case .alertSecondButtonReturn: connectICal()
+        default: break
+        }
+    }
+
+    func connectMacCalendar() {
+        func turnOn() {
+            var c = readConf(); c["CALENDAR_MACOS"] = "1"; if c["CALENDAR_AUTO"] == nil { c["CALENDAR_AUTO"] = "1" }; writeConf(c)
+            refresh(); readCalendar()
+            alert(t("connect_ok_title"), t("connect_mac_ok_body"))
+        }
+        if MacCalendar.authorized { turnOn(); return }
+        if MacCalendar.denied {
+            if let u = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") { NSWorkspace.shared.open(u) }
+            alert(t("connect_fail_title"), t("connect_mac_denied")); return
+        }
+        MacCalendar.requestAccess { ok in
+            DispatchQueue.main.async { if ok { turnOn() } else { self.alert(self.t("connect_fail_title"), self.t("connect_mac_denied")) } }
+        }
+    }
+
+    func connectICal() {
         let a = NSAlert()
         a.messageText = t("connect_title"); a.informativeText = t("connect_body")
         // Several hand-written addresses would vanish without a word: say so first.

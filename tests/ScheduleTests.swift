@@ -258,6 +258,61 @@ struct ScheduleTests {
         if case .failure = missing { check(true, "a missing local .ics is an error, not an empty calendar") }
         else { check(false, "a missing local .ics is an error, not an empty calendar") }
 
+        // ------------------------------------------------- the Mac's Calendar ---
+        func mev(_ uid: String, _ s: String, _ e: String, title: String = "M", allDay: Bool = false, cancelled: Bool = false,
+                 declined: Bool = false, texts: [String] = ["https://zoom.us/j/123"], occurrence: String? = nil) -> Schedule.MacEvent {
+            Schedule.MacEvent(uid: uid, occurrence: at(occurrence ?? s), title: title, start: at(s), end: at(e), allDay: allDay,
+                              cancelled: cancelled, declined: declined, texts: texts)
+        }
+        let w0 = at("2026-10-05 00:00"), w1 = at("2026-10-12 00:00")
+        let mac = Schedule.fromMacEvents([
+            mev("a", "2026-10-05 10:00", "2026-10-05 11:00", title: "Kept"),
+            mev("b", "2026-10-05 00:00", "2026-10-06 00:00", allDay: true),
+            mev("c", "2026-10-05 12:00", "2026-10-05 13:00", cancelled: true),
+            mev("d", "2026-10-05 14:00", "2026-10-05 15:00", declined: true),
+            mev("e", "2026-10-05 16:00", "2026-10-05 17:00", texts: ["Room 3", "", "no link here"]),
+            mev("f", "2026-10-06 09:00", "2026-10-06 23:30"),
+            mev("g", "2026-10-07 10:30", "2026-10-07 11:00", texts: ["", "", "Join: https://meet.google.com/abc-defg-hij)."], occurrence: "2026-10-07 10:00"),
+            mev("h", "2026-10-13 10:00", "2026-10-13 11:00"),
+        ], from: w0, to: w1, linkOnly: true)
+        check(mac.meetings.map { $0.id } == ["a@" + Schedule.key(at("2026-10-05 10:00")), "g@" + Schedule.key(at("2026-10-07 10:00"))],
+              "Mac Calendar: only timed, live, accepted events with a link, inside the window", "\(mac.meetings.map { $0.id })")
+        check(mac.meetings.last?.link == "https://meet.google.com/abc-defg-hij", "Mac Calendar: the link comes from the notes, without trailing punctuation")
+        check(mac.meetings.allSatisfy { $0.source == "macos" }, "Mac Calendar meetings are marked macos")
+        check(mac.warnings.count == 1, "Mac Calendar: an event over 12 h is left out with a warning")
+        check(Schedule.fromMacEvents([mev("e", "2026-10-05 16:00", "2026-10-05 17:00", texts: ["Room 3"])], from: w0, to: w1, linkOnly: false).meetings.count == 1,
+              "Mac Calendar: with CALENDAR_LINK_ONLY=0 an event without a link counts")
+
+        let mdir = NSTemporaryDirectory() + "ipsio-mac-\(getpid())"
+        try? FileManager.default.createDirectory(atPath: mdir, withIntermediateDirectories: true)
+        let msrc = Sources(dir: mdir, conf: ["CALENDAR_MACOS": "1"])
+        check(msrc.configured == ["macos"], "CALENDAR_MACOS=1 turns the source on")
+        Sources.macReader = nil
+        let r0 = msrc.read(now: at("2026-10-05 08:00"))
+        check(!r0.sourcesOk.contains("macos") && r0.errors.count == 1, "no EventKit in the program: an error, not an empty calendar")
+        Sources.macReader = { _, _ in .failure(Sources.Failure(description: "denied")) }
+        let r1 = msrc.read(now: at("2026-10-05 08:00"))
+        check(!r1.sourcesOk.contains("macos") && r1.errors.first?.contains("denied") == true, "no permission: an error the menu shows")
+        // The same meeting through the iCal address and the Mac's Calendar is recorded once.
+        let icsPath = mdir + "/same.ics"
+        try? ics("""
+        BEGIN:VEVENT
+        UID:same
+        SUMMARY:Twice
+        DTSTART:20261005T130000Z
+        DTEND:20261005T140000Z
+        LOCATION:https://zoom.us/j/999
+        END:VEVENT
+
+        """).write(toFile: icsPath, atomically: true, encoding: .utf8)
+        try? (icsPath + "\n").write(toFile: mdir + "/calendar.url", atomically: true, encoding: .utf8)
+        Sources.macReader = { _, _ in .success([mev("same", "2026-10-05 10:00", "2026-10-05 11:00", title: "Twice")]) }
+        let r2 = Sources(dir: mdir, conf: ["CALENDAR_MACOS": "1"]).read(now: at("2026-10-05 08:00"))
+        check(r2.sourcesOk == ["ics", "macos"] && r2.meetings.filter { $0.title == "Twice" }.count == 1,
+              "one meeting read from two sources is recorded once", "\(r2.meetings.map { $0.id }) \(r2.errors)")
+        Sources.macReader = nil
+        try? FileManager.default.removeItem(atPath: mdir)
+
         // ------------------------------------------------------ stale calendar ---
         let t0 = at("2026-10-05 08:00")
         check(!Schedule.stale(configured: false, lastOk: nil, start: t0, now: at("2026-10-06 08:00")), "no calendar is never stale")

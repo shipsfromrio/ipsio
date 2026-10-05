@@ -13,6 +13,9 @@ struct CalendarCLI {
     static func main() {
         let dir = ProcessInfo.processInfo.environment["IPSIO_DIR"] ?? (NSHomeDirectory() + "/.ipsio")
         let conf = readConf(dir + "/conf")
+        // Reads the Mac's Calendar only if this Terminal already has the
+        // permission; it never asks (the app asks, under its own name).
+        MacCalendar.install()
         Schedule.lang = Schedule.language(conf)
         let L = Schedule.L
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm"
@@ -29,8 +32,8 @@ struct CalendarCLI {
         } else {
             let sources = Sources(dir: dir, conf: conf)
             if sources.configured.isEmpty {
-                print(L("no calendar source configured in \(dir) (calendar.url, calendar.txt or CALENDAR_COMMAND)",
-                        "nenhuma fonte de agenda configurada em \(dir) (calendar.url, calendar.txt ou CALENDAR_COMMAND)"))
+                print(L("no calendar source configured in \(dir) (calendar.url, calendar.txt, CALENDAR_COMMAND or CALENDAR_MACOS)",
+                        "nenhuma fonte de agenda configurada em \(dir) (calendar.url, calendar.txt, CALENDAR_COMMAND ou CALENDAR_MACOS)"))
                 exit(2)
             }
             let r = sources.read(now: now)

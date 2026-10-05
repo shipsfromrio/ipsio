@@ -376,6 +376,7 @@ doctor() {
   [ -s "$DIR/calendar.url" ] && cal="${cal:+$cal,}ics"
   [ -s "$DIR/calendar.txt" ] && cal="${cal:+$cal,}list"
   [ -n "${CALENDAR_COMMAND:-}" ] && cal="${cal:+$cal,}command"
+  [ "${CALENDAR_MACOS:-}" = 1 ] && cal="${cal:+$cal,}macos"
   if [ -n "$miss" ]; then t doctor_incomplete; else t doctor_ok; fi
   echo
   printf '%s' "$out"

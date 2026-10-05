@@ -26,8 +26,8 @@ jobs:
       - name: build the app, ipsio-calendar and the device creator
         run: |
           swiftc --version
-          swiftc -O -parse-as-library app/Schedule.swift app/Setup.swift app/SetupWindow.swift app/Ipsio.swift -framework AppKit -o "$RUNNER_TEMP/Ipsio"
-          swiftc -O -parse-as-library app/Schedule.swift app/CalendarCLI.swift -o "$RUNNER_TEMP/ipsio-calendar"
+          swiftc -O -parse-as-library app/Schedule.swift app/MacCalendar.swift app/Setup.swift app/SetupWindow.swift app/Ipsio.swift -framework AppKit -o "$RUNNER_TEMP/Ipsio"
+          swiftc -O -parse-as-library app/Schedule.swift app/MacCalendar.swift app/CalendarCLI.swift -o "$RUNNER_TEMP/ipsio-calendar"
           swiftc -O tools/create-device.swift -o "$RUNNER_TEMP/create-device"
       - name: calendar bench
         run: |

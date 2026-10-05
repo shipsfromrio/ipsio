@@ -445,6 +445,40 @@ enum Schedule {
         return now.timeIntervalSince(lastOk ?? start) > limit
     }
 
+    /// One event of the Mac's Calendar app, as plain values: the EventKit
+    /// adapter (app/MacCalendar.swift) fills it, and this file stays testable
+    /// without EventKit or a permission.
+    struct MacEvent {
+        let uid: String          // calendarItemExternalIdentifier: the iCal UID when the account has one
+        let occurrence: Date     // the slot the occurrence was planned for (moved ones keep their id)
+        let title: String
+        let start: Date
+        let end: Date
+        let allDay: Bool
+        let cancelled: Bool
+        let declined: Bool       // you are an attendee and said no
+        let texts: [String]      // url, location, notes: where the meeting link lives
+    }
+
+    /// The same rules as the iCal reader: no all-day, cancelled or declined
+    /// event, nothing over 12 h, and (with linkOnly) only events with a video
+    /// link. The id is uid@slot, like the iCal one, so the same meeting read
+    /// from both sources is recorded once.
+    static func fromMacEvents(_ evs: [MacEvent], from: Date, to: Date, linkOnly: Bool) -> (meetings: [Meeting], warnings: [String]) {
+        var out: [Meeting] = [], warnings: [String] = []
+        for e in evs {
+            guard !e.cancelled, !e.declined, !e.allDay, e.end > e.start, e.end > from, e.start < to else { continue }
+            if e.end.timeIntervalSince(e.start) > 12 * 3600 {
+                warnings.append(L("'\(e.title)' lasts more than 12 h; left out", "'\(e.title)' dura mais de 12 h; fica de fora")); continue
+            }
+            let l = link(e.texts)
+            if linkOnly && l.isEmpty { continue }
+            out.append(Meeting(id: e.uid + "@" + key(e.occurrence), title: e.title.isEmpty ? untitled : e.title,
+                               start: e.start, end: e.end, link: l, source: "macos"))
+        }
+        return (out, warnings)
+    }
+
     /// The next n that will be (or are being) recorded, in order.
     static func upcoming(now: Date, meetings: [Meeting], after: TimeInterval, n: Int) -> [Meeting] {
         Array(meetings.filter { $0.end.addingTimeInterval(after) > now }.sorted { ($0.start, $0.id) < ($1.start, $1.id) }.prefix(n))
@@ -498,6 +532,7 @@ struct Sources {
         if FileManager.default.fileExists(atPath: urlFile) { f.append("ics") }
         if FileManager.default.fileExists(atPath: listFile) { f.append("list") }
         if !(conf["CALENDAR_COMMAND"] ?? "").isEmpty { f.append("command") }
+        if conf["CALENDAR_MACOS"] == "1" { f.append("macos") }
         return f
     }
 
@@ -538,8 +573,26 @@ struct Sources {
             case .failure(let e): errors.append("CALENDAR_COMMAND: \(e)")
             }
         }
+        if configured.contains("macos") {
+            if let reader = Sources.macReader {
+                switch reader(from, to) {
+                case .success(let evs):
+                    let r = Schedule.fromMacEvents(evs, from: from, to: to, linkOnly: linkOnly)
+                    meetings += r.meetings; warnings += r.warnings; ok.insert("macos")
+                case .failure(let e): errors.append(Schedule.L("Mac Calendar: ", "Calendário do Mac: ") + e.description)
+                }
+            } else { errors.append(Schedule.L("Mac Calendar: not available in this program", "Calendário do Mac: indisponível neste programa")) }
+        }
+        // The same meeting reached through two sources (the iCal address and
+        // the Mac's Calendar of the same account) has the same id: keep one.
+        var seen = Set<String>()
+        meetings = meetings.filter { seen.insert($0.id).inserted }
         return Reading(meetings: meetings, sourcesOk: ok, errors: errors, warnings: warnings)
     }
+
+    /// Set by the programs that link EventKit (the app, ipsio-calendar); nil
+    /// elsewhere, and then the "macos" source reports itself unavailable.
+    nonisolated(unsafe) static var macReader: ((Date, Date) -> Result<[Schedule.MacEvent], Failure>)?
 
     struct Failure: Error, CustomStringConvertible { let description: String }
 

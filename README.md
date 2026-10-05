@@ -116,6 +116,7 @@ Sources (you can use more than one; no credential lives in the code):
 
 | Source | How to turn it on | What is kept |
 |---|---|---|
+| **Mac Calendar** (every account already in the Calendar app) | menu, **Connect calendar…**, **Mac's Calendar**, then **Allow** (or `CALENDAR_MACOS=1` in the conf) | same filters as iCal; no address to paste, nothing leaves the Mac |
 | **Secret iCal** (Google, Outlook, iCloud) | menu, **Connect calendar…**, paste the address (or write it in `~/.ipsio/calendar.url`, one per line) | events with a Meet, Zoom, Teams or Webex link; not all-day, cancelled, or declined by you (with `CALENDAR_ME`) |
 | **List** | `~/.ipsio/calendar.txt`, lines `YYYY-MM-DD HH:MM HH:MM Name` | everything |
 | **Command** | `CALENDAR_COMMAND='...'` in the conf; it prints lines in the list format | everything; the door for a calendar behind its own credential (OAuth, a company API): the credential stays in your program. Killed after 60 s |
@@ -153,6 +154,7 @@ menu. It is right as long as the Mac and the calendar share a time zone.
 | `CALENDAR_MODE` | `meeting` | mode of calendar recordings |
 | `CALENDAR_ME` | empty | your calendar e-mail, to skip what you declined |
 | `CALENDAR_LINK_ONLY` | `1` | `0` also records iCal events without a link |
+| `CALENDAR_MACOS` | empty | `1` reads the Mac Calendar app (above) |
 | `CALENDAR_COMMAND` | empty | command source (above) |
 | `POST_RECORDING` | empty | command run after each saved recording, with the `.mkv` as `$1` (see below) |
 

@@ -113,6 +113,7 @@ Fontes (pode usar mais de uma; nenhuma credencial fica no código):
 
 | Fonte | Como ligar | O que entra |
 |---|---|---|
+| **Calendário do Mac** (toda conta que já está no app Calendário) | menu, **Conectar agenda…**, **Calendário do Mac**, depois **Permitir** (ou `CALENDAR_MACOS=1` na conf) | os mesmos filtros do iCal; sem endereço para colar, nada sai do Mac |
 | **iCal secreto** (Google, Outlook, iCloud) | menu, **Conectar agenda…**, cole o endereço (ou escreva em `~/.ipsio/calendar.url`, um por linha) | eventos com link de Meet, Zoom, Teams ou Webex; sem os de dia inteiro, cancelados e os que você recusou (com `CALENDAR_ME`) |
 | **Lista** | `~/.ipsio/calendar.txt`, linhas `AAAA-MM-DD HH:MM HH:MM Nome` | tudo |
 | **Comando** | `CALENDAR_COMMAND='...'` na conf; ele imprime linhas no formato da lista | tudo; é a porta para quem tem a agenda atrás de credencial própria (OAuth, API da empresa): a credencial fica no seu programa. Morto depois de 60 s |
@@ -150,6 +151,7 @@ Mac e a agenda estiverem no mesmo fuso.
 | `CALENDAR_MODE` | `meeting` | modo das gravações da agenda |
 | `CALENDAR_ME` | vazio | seu e-mail na agenda, para pular o que você recusou |
 | `CALENDAR_LINK_ONLY` | `1` | `0` grava também evento do iCal sem link |
+| `CALENDAR_MACOS` | vazio | `1` lê o app Calendário do Mac (acima) |
 | `CALENDAR_COMMAND` | vazio | fonte por comando (acima) |
 | `POST_RECORDING` | vazio | comando rodado depois de cada gravação salva, com o `.mkv` em `$1` (veja abaixo) |
 
