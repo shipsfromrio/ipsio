@@ -87,3 +87,25 @@ The same standard as the rest: ffmpeg and ffprobe doubles, one case per
 refusal (missing track, different duration, no transcript, recording in
 progress, name outside the pattern) and mutants that require it to fail a
 cleanup that deletes without checking.
+
+## 3. Native engine (no BlackHole, no ffmpeg)
+
+The App Store build cannot ship a driver, Homebrew tools or a script, so the
+recorder moves to ScreenCaptureKit + AVAssetWriter inside the app.
+`tools/sck-probe.swift` is the phase-0 probe: main display + system sound +
+microphone into a fragmented `.mov`, with the same settings as `ipsio.sh`
+(12 fps, H.264 on the video chip at 4 Mbps, AAC 128k).
+
+### Measured on 05/10/2026 (Apple M5 Max, macOS 26.6, 60 s, a sound playing and windows opening)
+
+| | ffmpeg (meeting mode, today) | native probe |
+|---|---|---|
+| CPU, average | 11.1% | 2.6% |
+| memory, average | 194 MB | 72 MB |
+| file for 60 s | 11.8 MB | 1.4 MB (frames only when the screen changes) |
+| system sound | needs BlackHole and the output switched | captured directly (-19 dB peak), output untouched |
+| `kill -9` at 15 s | `.mkv` survives | `.mov` survives: plays and decodes to the last 2 s fragment |
+| start offset mic vs video | n/a | 0.07 s (one host clock) |
+
+Gate passed on CPU, memory and crash survival. Still to measure: alignment
+over a 2 h recording, and a run on macOS 13.
