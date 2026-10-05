@@ -231,7 +231,15 @@ struct ScheduleTests {
         check(target("2026-10-05 09:57") == "-", "before the margin: no recording")
         check(target("2026-10-05 09:58") == "A", "2 min before: already recording")
         check(target("2026-10-05 10:57") == "A", "during the meeting: records it")
-        check(target("2026-10-05 10:58") == "B", "back-to-back: switches to the one starting")
+        check(target("2026-10-05 10:58") == "B", "nothing recording, back-to-back: the one starting")
+        func held(_ t: String, _ ms: [Meeting], _ cur: String) -> String { Schedule.target(now: at(t), meetings: ms, skipped: [], before: 120, after: 300, current: cur)?.id ?? "-" }
+        check(held("2026-10-05 10:58", ab, "A") == "A", "back-to-back: the one recording keeps its last 2 minutes")
+        check(held("2026-10-05 11:00", ab, "A") == "B", "back-to-back: at its end it hands over to the next")
+        let inv = mt("I", "2026-10-05 10:30", "2026-10-05 11:00")
+        check(held("2026-10-05 10:29", [a, inv], "A") == "A", "an overlapping invite does not cut the call being recorded")
+        check(held("2026-10-05 11:01", [a, inv], "A") == "A", "an invite the call fully covers is not started after it")
+        let long = mt("L", "2026-10-05 10:30", "2026-10-05 12:00")
+        check(held("2026-10-05 11:00", [a, long], "A") == "L", "an overlap that goes beyond takes over at the end")
         check(target("2026-10-05 12:04") == "B", "5 min after the end: still recording")
         check(target("2026-10-05 12:05") == "-", "after the margin: stops")
         check(target("2026-10-05 11:01", ["B"]) == "A", "next one skipped: the previous keeps its margin")
@@ -327,6 +335,31 @@ struct ScheduleTests {
         ss.writeLastOk(at("2026-10-05 09:00"))
         check(ss.readLastOk() == at("2026-10-05 09:00"), "the last success survives a restart")
         try? FileManager.default.removeItem(atPath: sdir)
+
+        // ------------------------------------------------------------ runner ---
+        let r0t = Date()
+        let hung = Runner.run("/bin/bash", ["-c", "echo hi; exec sleep 30"], limit: 1)
+        check(hung.timedOut && hung.out.contains("hi") && Date().timeIntervalSince(r0t) < 10,
+              "a hung program is stopped at the deadline, with what it printed", "\(hung) \(Date().timeIntervalSince(r0t))")
+        let r1t = Date()
+        let holder = Runner.run("/bin/bash", ["-c", "(sleep 30) & echo hi"], limit: 2)
+        check(Date().timeIntervalSince(r1t) < 10, "a child left holding the pipe does not hold the caller past the deadline", "\(Date().timeIntervalSince(r1t))")
+        _ = holder
+        let fine = Runner.run("/bin/bash", ["-c", "echo out; echo err >&2; exit 3"], limit: 10, mergeErr: false)
+        check(!fine.timedOut && fine.out == "out\n" && fine.err == "err\n" && fine.status == 3, "a normal run: output, errors and status apart", "\(fine)")
+        check(Runner.run("/nonexistent/x", [], limit: 5).launchError != nil, "a program that cannot start is an error, not a hang")
+
+        // A removed calendar must not keep recording from the cache.
+        let rdir = NSTemporaryDirectory() + "ipsio-removed-\(getpid())"
+        try? FileManager.default.createDirectory(atPath: rdir, withIntermediateDirectories: true)
+        try? "2026-10-05 10:00 11:00 Kept\n".write(toFile: rdir + "/calendar.txt", atomically: true, encoding: .utf8)
+        let rs = Sources(dir: rdir, conf: [:])
+        rs.writeCache([Meeting(id: "a", title: "Gone", start: at("2026-10-05 10:00"), end: at("2026-10-05 11:00"), link: "https://zoom.us/j/1", source: "ics"),
+                       Meeting(id: "b", title: "Kept", start: at("2026-10-05 10:00"), end: at("2026-10-05 11:00"), link: "", source: "list")])
+        check(rs.readCache().map { $0.title } == ["Kept"], "the cache drops meetings of a source no longer configured", "\(rs.readCache().map { $0.title })")
+        try? FileManager.default.removeItem(atPath: rdir + "/calendar.txt")
+        check(rs.readCache().isEmpty, "no source left: the cache is empty")
+        try? FileManager.default.removeItem(atPath: rdir)
 
         // ------------------------------------------------- connect calendar ---
         check(Sources.normalizeAddress(" webcal://calendar.example.com/x/basic.ics ") == "https://calendar.example.com/x/basic.ics", "webcal becomes https, spaces trimmed")

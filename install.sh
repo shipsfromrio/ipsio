@@ -39,7 +39,7 @@ swiftc -O -o "$T/create-device" tools/create-device.swift
 "$T/create-device" "$DEVICE"
 SwitchAudioSource -a -t output | grep -qxF "$DEVICE" || { echo "the device '$DEVICE' did not show up; see the README (create it by hand)"; exit 1; }
 if [ "$DEVICE" != "Ipsio" ]; then
-  mkdir -p ~/.ipsio
+  mkdir -p ~/.ipsio && chmod 700 ~/.ipsio
   grep -q '^OUTPUT_DEVICE=' ~/.ipsio/conf 2>/dev/null || echo "OUTPUT_DEVICE='$DEVICE'" >> ~/.ipsio/conf
 fi
 echo "== certificate =="

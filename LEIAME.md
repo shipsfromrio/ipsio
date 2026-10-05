@@ -101,8 +101,9 @@ Pelo Terminal, a mesma receita (o app só chama este script):
 
 A cada 5 minutos o app lê as fontes configuradas. Cada reunião é gravada de
 2 minutos antes do início a 5 minutos depois do fim, no modo reunião. Duas
-reuniões seguidas viram dois arquivos: quando a segunda começa, a primeira
-fecha. Gravação começada à mão nunca é parada nem trocada pela agenda. Se a
+reuniões seguidas viram dois arquivos: a primeira grava até o horário de
+fim dela, e então a segunda assume. Um convite que se sobrepõe à reunião em
+gravação nunca a corta; se terminar depois dela, assume nesse fim. Gravação começada à mão nunca é parada nem trocada pela agenda. Se a
 leitura falhar (rede, por exemplo), vale a última lida, e o menu diz desde
 quando. Depois de 2 horas sem uma leitura completa, a linha do menu vira aviso e
 uma notificação diz o motivo: reunião marcada depois disso não entraria. Com
@@ -163,7 +164,8 @@ Em seguida, se houver `POST_RECORDING`, ele roda com o arquivo em `$1`; é por
 aqui que entram a transcrição ou a cópia para outro disco. Os dois rodam em
 segundo plano, com a saída em `~/.ipsio/post-recording.log` (com o código de
 saída); um comando que falha nunca mexe no vídeo, e parar a gravação nunca
-espera por eles.
+espera por eles. Cada gravação é entregue uma vez só (parar de novo não roda
+outra vez), e o trecho de 10 s do **Testar agora** nunca é.
 
     POST_RECORDING='~/bin/transcrever.sh'
 
@@ -188,6 +190,11 @@ e ligue de novo.
   grava (tela bloqueada grava a tela de bloqueio).
 - O volume das teclas pode não agir com a saída múltipla ativa; ajuste o
   volume dentro do app de reunião.
+- A chave de assinatura que o `certificate.sh` cria fica no chaveiro do
+  sistema, usável pelo `codesign` sem pergunta (é o que deixa a atualização
+  reassinar sozinha). Um programa que já esteja rodando neste Mac poderia se
+  assinar como Ipsio e herdar as permissões de Gravação de Tela e Microfone.
+  Um certificado Developer ID, ou uma pergunta a cada assinatura, fecharia isso.
 
 ## Depois
 

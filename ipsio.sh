@@ -77,6 +77,7 @@ if [ -z "${UI_LANGUAGE:-}" ]; then
 fi
 L="$UI_LANGUAGE"; [ "$L" = "en" ] || L=pt
 # Thresholds, in dB of RMS (10 s average, one sample per second).
+METER_STALE_S=20   # live meter without a new sample this long = no sound coming in
 SILENCE_DB=-60      # computer sound below this = nobody talking there
 MIC_DEAD_DB=-80     # microphone below this = a dead microphone, not silence
 
@@ -107,6 +108,7 @@ t() {
     not_recording) echo "NOT RECORDING"; echo "There is no recording in progress.";;
     measuring) echo "MEASURING"; echo "First seconds; sound is measured every second.";;
     silent_for) echo "Silent for about $1 s.";;
+    meter_stalled) echo "NO SOUND"; echo "The recorder has received no sound for about $1 s: the sound device may have been unplugged or taken by another app. Stop and record again; if it repeats, restart the Mac.";;
     no_track) echo "NO SOUND"; echo "The file has no audio track. Stop, check that BlackHole is among the devices, and record again.";;
     too_early) echo "TOO EARLY"; echo "Could not measure yet. Wait 1 minute of speech and check again.";;
     does_not_open) echo "FILE DOES NOT OPEN"; echo "$1 ended up with $2 but ffprobe cannot read its duration. Do not delete it: .mkv is usually recoverable (ffmpeg -i file -c copy new.mkv).";;
@@ -169,6 +171,7 @@ t() {
     not_recording) echo "NADA GRAVANDO"; echo "Não há gravação em andamento.";;
     measuring) echo "MEDINDO"; echo "Primeiros segundos; o som é medido a cada segundo.";;
     silent_for) echo "Silêncio há cerca de $1 s.";;
+    meter_stalled) echo "SEM SOM"; echo "O gravador não recebe som há cerca de $1 s: o dispositivo de som pode ter sido desconectado ou tomado por outro app. Pare e grave de novo; se repetir, reinicie o Mac.";;
     no_track) echo "SEM SOM"; echo "O arquivo não tem faixa de áudio. Pare, confira se o BlackHole aparece nos dispositivos e grave de novo.";;
     too_early) echo "AINDA CEDO"; echo "Ainda não deu para medir. Espere 1 minuto de fala e confira de novo.";;
     does_not_open) echo "ARQUIVO NÃO ABRE"; echo "$1 ficou com $2 mas o ffprobe não lê a duração. Não apague: o .mkv costuma ser recuperável (ffmpeg -i arquivo -c copy novo.mkv).";;
@@ -250,6 +253,8 @@ state() { echo "#state $*"; }
 # samples <meter file>: one RMS value per line (dB or -inf).
 samples() { grep RMS_level "$1" 2>/dev/null | cut -d= -f2; }
 last_sample() { samples "$1" | tail -1; }
+# file_age <file>: seconds since it was last written (GNU stat, then BSD).
+file_age() { local m; m=$(stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null) || return 1; [ -n "$m" ] || return 1; echo $(( $(date +%s) - m )); }
 # trailing_silence <file> <threshold>: consecutive seconds below it at the end.
 trailing_silence() { samples "$1" | awk -v lim="$2" '{ if ($1=="-inf" || $1+0 < lim) n++; else n=0 } END{print n+0}'; }
 # mic_dead <file>: true if there are samples and ALL are below the dead-mic threshold.
@@ -312,6 +317,8 @@ safe_path() { case "$1" in *[\ :,\;\'\"\[\]\\]*) return 1;; esac; return 0; }
 sha256_of() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1"; else sha256sum "$1"; fi 2>/dev/null | awk '{print $1}'; }
 after_save() {
   local f="$1"
+  # The 10 s take of "test" is deleted right after: no evidence, no hook.
+  [ "${IPSIO_TEST_TAKE:-}" = 1 ] && return 0
   (
     sum=$(sha256_of "$f")
     if [ -n "$sum" ]; then printf '%s  %s\n' "$sum" "$(basename "$f")" > "$f.sha256.tmp" && mv -f "$f.sha256.tmp" "$f.sha256"; fi
@@ -389,7 +396,8 @@ main() {
 case "$1" in
   start)
     if recording; then t already_recording; state verdict=ALREADY_RECORDING; exit 0; fi
-    mkdir -p "$DIR"
+    # Private: conf may hold a token in CALENDAR_COMMAND, the cache has titles and links.
+    [ -d "$DIR" ] || (umask 077; mkdir -p "$DIR")
     safe_path "$DIR" || { t invalid_dir; state verdict=INVALID_DIR; exit 1; }
     # --- preflight, fail closed: every item below REFUSES with a verdict ---
     VID=$(index video "Capture screen 0"); AUD=$(index audio "BlackHole 2ch")
@@ -486,6 +494,14 @@ case "$1" in
       [ -z "$(last_sample "$LEVEL_MIC")" ] && MS=$(samples "$LEVEL" | wc -l | tr -d ' ')
       MICS=" mic=$(last_sample "$LEVEL_MIC") mic_silence=$MS"
     fi
+    # The meter gets one sample per second. Nothing new for METER_STALE_S
+    # while ffmpeg is alive (device unplugged or hogged, coreaudiod restarted)
+    # is silence: not "measuring" forever, nor the last good value repeated.
+    AGE=$(file_age "$LEVEL" || file_age "$PIDFILE")
+    if [ "${AGE:-0}" -gt "$METER_STALE_S" ]; then
+      t meter_stalled "$AGE"; echo ""; t detail "$(t recorded "$T" "$SZ")"
+      state "verdict=NO_SOUND mode=$RM silence=$AGE time=$T size=$SZ disk_h=$HOURS$MICS"; exit 2
+    fi
     if [ -z "$LAST" ]; then t measuring; echo ""; t detail "$(t recorded "$T" "$SZ")"; state "verdict=MEASURING mode=$RM silence=0 time=$T size=$SZ disk_h=$HOURS$MICS"; exit 0; fi
     # astats writes ONE sample per second, each over the window of the last
     # 10 s (reset=10 is the window, not the step; measured: 57 samples in
@@ -528,6 +544,15 @@ case "$1" in
       if is_recorder "$P"; then
         kill -INT "$P" 2>/dev/null   # SIGINT: ffmpeg closes the file cleanly
         for _ in 1 2 3 4 5; do is_recorder "$P" || break; sleep 1; done
+        # A long file on a slow disk may still be closing (flush, cues,
+        # duration): keep waiting while it grows, up to 60 s more. A kill -9
+        # there leaves a file without duration, which reads as DOES_NOT_OPEN.
+        F=$(current_file); PREV=-1
+        for _ in $(seq 1 30); do
+          is_recorder "$P" || break
+          NOW=$(wc -c < "$F" 2>/dev/null | tr -d ' '); [ "${NOW:-0}" = "$PREV" ] && break
+          PREV=${NOW:-0}; sleep 2
+        done
         is_recorder "$P" && kill -9 "$P" 2>/dev/null   # only if still alive; the mkv survives
       fi
     fi
@@ -553,8 +578,13 @@ case "$1" in
         esac
       fi
       if [ -z "$D" ] || awk "BEGIN{exit !(${D:-0} <= 0)}"; then
+        rm -f "$FILEREC" "$MODEREC"
         t does_not_open "$(basename "$A")" "$(size_of "$A")"; echo ""; t detail "$(t detail_stop "$(SwitchAudioSource -c -t output)")"; state verdict=DOES_NOT_OPEN file="$A"; exit 1
       fi
+      # Forget the file once it is dealt with: a second stop (the app runs one
+      # at launch when the output is stuck on Ipsio) must not save it again
+      # and re-run the hook on it.
+      rm -f "$FILEREC" "$MODEREC"
       after_save "$A"
       t "$TIT"
       t saved_body "$(basename "$A")" "$DUR" "$(size_of "$A")" "$SND" "$(dirname "$A")"
@@ -589,7 +619,7 @@ case "$1" in
     else say "recording test: one, two, three, four, five" 2>/dev/null; fi
     sleep 3
     A=$(current_file)
-    bash "$0" stop >/dev/null
+    IPSIO_TEST_TAKE=1 bash "$0" stop >/dev/null
     # Meeting: the sentence must reach the COMPUTER track (1), not just the
     # mix; the microphone hears the speaker and would pass a broken BlackHole.
     if [ "$MODE" = "meeting" ]; then MEAN=$(track_mean "$A" 1); MICM=$(track_mean "$A" 2)

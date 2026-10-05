@@ -104,8 +104,10 @@ From Terminal, the same recipe (the app only calls this script):
 
 Every 5 minutes the app reads the configured sources. Each meeting is recorded
 from 2 minutes before the start to 5 minutes after the end, in meeting mode.
-Back-to-back meetings become two files: when the second one starts, the first
-one closes. A recording started by hand is never stopped or replaced by the
+Back-to-back meetings become two files: the first one keeps recording until
+its scheduled end, then the second takes over. An invite that overlaps the
+meeting being recorded never cuts it; if it ends after it, it takes over at
+that end. A recording started by hand is never stopped or replaced by the
 calendar. If a reading fails (network, for example), the last good reading
 still counts, and the menu says since when. After 2 hours without a full
 reading, the menu line turns into a warning and a notification says why: a
@@ -165,7 +167,9 @@ Every saved recording gets, next to it, a `.sha256` file in the format that
 Then, if `POST_RECORDING` is set, it runs with the file as `$1`; transcription
 or a copy to another disk plug in here. Both run in the background, with their
 output in `~/.ipsio/post-recording.log` (with the exit code); a failing command
-never touches the video, and stopping a recording never waits for them.
+never touches the video, and stopping a recording never waits for them. Each
+recording is handed over once (stopping again does not re-run it), and the
+10-second take of **Test now** never is.
 
     POST_RECORDING='~/bin/transcribe.sh'
 
@@ -188,6 +192,11 @@ from an old signature: remove it with "−" in Settings and turn it on again.
   does not record (a locked screen records the lock screen).
 - The volume keys may not act while the multi-output device is on; adjust the
   volume inside the meeting app.
+- The signing key that `certificate.sh` creates sits in the System keychain,
+  usable by `codesign` with no prompt (that is what lets an update re-sign
+  unattended). A program already running on this Mac could sign itself as
+  Ipsio and inherit its Screen Recording and Microphone permissions. A
+  Developer ID certificate, or a prompt on every signature, would close it.
 
 ## Next
 

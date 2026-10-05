@@ -160,6 +160,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "connect_replaces": "Atenção: hoje há %@ endereços em calendar.url, e este substitui todos.",
             "calendar_stale": "⚠ Agenda sem atualizar desde %@", "calendar_never": "a abertura do app",
             "calendar_stale_title": "A agenda parou de atualizar",
+            "script_timeout_title": "O Ipsio não respondeu",
+            "script_timeout_body": "O passo “%@” passou de %@ s e foi interrompido. Costuma ser um dispositivo de som ou a captura de tela travados: desconecte e conecte o fone ou a placa de som, ou reinicie o Mac, e tente de novo.",
+            "check_running": "Ainda conferindo o arquivo anterior.",
             "calendar_stale_body": "A leitura falha desde %@. O Ipsio segue gravando pela última leitura, mas reunião marcada depois disso não entra. Motivo: %@",
             "connect_choice_body": "De onde o Ipsio lê as suas reuniões? O Calendário do Mac já tem as contas que você adicionou nele (Google, iCloud, Exchange): basta um \"Permitir\". O endereço iCal serve para uma agenda que não está no Calendário.",
             "connect_mac": "Calendário do Mac (recomendado)", "connect_ical": "Endereço iCal…",
@@ -238,6 +241,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "connect_replaces": "Note: calendar.url holds %@ addresses today, and this one replaces all of them.",
             "calendar_stale": "⚠ Calendar not updated since %@", "calendar_never": "the app opened",
             "calendar_stale_title": "The calendar stopped updating",
+            "script_timeout_title": "Ipsio did not answer",
+            "script_timeout_body": "The step “%@” took over %@ s and was stopped. It is usually a wedged sound device or screen capture: unplug and replug the headset or sound card, or restart the Mac, and try again.",
+            "check_running": "Still checking the previous file.",
             "calendar_stale_body": "Reading has failed since %@. Ipsio keeps recording from the last reading, but a meeting added after that will be missed. Reason: %@",
             "connect_choice_body": "Where should Ipsio read your meetings from? The Mac's Calendar already has the accounts you added to it (Google, iCloud, Exchange): one \"Allow\" is enough. The iCal address is for a calendar that is not in Calendar.",
             "connect_mac": "Mac's Calendar (recommended)", "connect_ical": "iCal address…",
@@ -288,7 +294,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         return d
     }
     func writeConf(_ d: [String: String]) {
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let lines = d.keys.sorted().map { k in "\(k)='" + d[k]!.replacingOccurrences(of: "'", with: "'\\''") + "'" }
         try? (lines.joined(separator: "\n") + "\n").write(toFile: confPath, atomically: true, encoding: .utf8)
     }
@@ -301,7 +307,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         // A single instance: a kickstart on top of an app opened outside launchd
         // once left two circles in the bar.
         if let bid = Bundle.main.bundleIdentifier, NSRunningApplication.runningApplications(withBundleIdentifier: bid).count > 1 { NSApp.terminate(nil); return }
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        // Private, like install-app.sh makes it: conf may hold a token in
+        // CALENDAR_COMMAND, and the cache has meeting titles and links.
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir)
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         // Without this NSMenu re-enables every item that has an action by
         // itself, and "Record" stayed clickable during a recording.
@@ -476,16 +485,15 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     }
 
     // ---- script ----
+    /// With a deadline: a wedged ffmpeg (device enumeration, a hung
+    /// screencapture) used to hold "busy" forever, and with it every calendar
+    /// start and stop. check decodes the whole file, so it gets longer.
     func run(_ cmd: String, env: [String: String] = [:]) -> String {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/bash")
-        p.arguments = [script, cmd]
-        if !env.isEmpty { p.environment = ProcessInfo.processInfo.environment.merging(env) { _, b in b } }
-        let out = Pipe(); p.standardOutput = out; p.standardError = out
-        do { try p.run() } catch { return "COULD NOT RUN THE SCRIPT\n\(script): \(error)" }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        return String(decoding: data, as: UTF8.self)
+        let limit: TimeInterval = cmd == "check" ? 1800 : 180
+        let r = Runner.run("/bin/bash", [script, cmd], env: env.isEmpty ? nil : ProcessInfo.processInfo.environment.merging(env) { _, b in b }, limit: limit)
+        if let e = r.launchError { return "COULD NOT RUN THE SCRIPT\n\(script): \(e)" }
+        if r.timedOut { return t("script_timeout_title") + "\n" + t("script_timeout_body", cmd, String(Int(limit))) + "\n#state verdict=TIMEOUT" }
+        return r.out
     }
     // Splits the script output into: title (first line), body (the rest,
     // without the machine line) and the dictionary of the "#state key=value ..." line.
@@ -730,7 +738,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
 
     func readCalendar() {
         let sources = Sources(dir: dir, conf: readConf())
-        guard !sources.configured.isEmpty, !readingCalendar else { return }
+        // No source left (calendar.url deleted, list removed): forget what the
+        // removed calendar had, or it would keep starting recordings.
+        if sources.configured.isEmpty { meetings = []; calendarErrors = []; calendarWarnings = []; return }
+        guard !readingCalendar else { return }
         readingCalendar = true
         DispatchQueue.global().async {
             let r = sources.read()
@@ -763,7 +774,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     func decideCalendar() {
         let now = Date()
         let target = Schedule.target(now: now, meetings: meetings, skipped: skipped,
-                                     before: minutes("CALENDAR_BEFORE_MIN", 2), after: minutes("CALENDAR_AFTER_MIN", 5))
+                                     before: minutes("CALENDAR_BEFORE_MIN", 2), after: minutes("CALENDAR_AFTER_MIN", 5),
+                                     current: recording() ? readMarker()?.id : nil)
         keepAwake(now)
         // A start or stop already in flight (manual or not): decide on the next tick.
         if busy { return }
@@ -875,8 +887,12 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         }
     }
     @objc func doCheck() {
+        // Each click decodes the whole file next to the recorder: one at a time.
+        guard !checking else { notify(t("volume"), t("check_running")); return }
+        checking = true
         DispatchQueue.global().async {
             let r = self.run("check")
+            DispatchQueue.main.async { self.checking = false }
             self.alertFromScript(r, title: self.t("volume"))
         }
     }
@@ -946,6 +962,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     @objc func doDoctor() { setup.show() }
 
     // ---- first-run window ----
+    var checking = false
     lazy var setup: SetupWindow = {
         let w = SetupWindow(app: self)
         w.onComplete = { [weak self] in

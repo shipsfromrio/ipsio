@@ -431,9 +431,19 @@ enum Schedule {
     /// [start - before, end + after). Two windows touching (back-to-back
     /// meetings): the one that started last wins, and the file changes. A tie
     /// on start: the smallest id, so the decision does not depend on list order.
-    static func target(now: Date, meetings: [Meeting], skipped: Set<String>, before: TimeInterval, after: TimeInterval) -> Meeting? {
+    /// `current` is the meeting the calendar is recording now. It keeps the
+    /// file until its own scheduled end: an overlapping invite (10:30 inside a
+    /// 10:00-11:00 call) used to cut the call in the middle, and a back-to-back
+    /// one cut its last 2 minutes. Past its end it hands over only to a meeting
+    /// that goes beyond it; one it fully covers is not started.
+    static func target(now: Date, meetings: [Meeting], skipped: Set<String>, before: TimeInterval, after: TimeInterval, current: String? = nil) -> Meeting? {
         let inside = meetings.filter { !skipped.contains($0.id) && now >= $0.start.addingTimeInterval(-before) && now < $0.end.addingTimeInterval(after) }
-        return inside.max { a, b in a.start != b.start ? a.start < b.start : a.id > b.id }
+        let latest: (Meeting, Meeting) -> Bool = { a, b in a.start != b.start ? a.start < b.start : a.id > b.id }
+        if let c = current, let cur = inside.first(where: { $0.id == c }) {
+            if now < cur.end { return cur }
+            return inside.filter { $0.id != c && $0.end > cur.end }.max(by: latest) ?? cur
+        }
+        return inside.max(by: latest)
     }
 
     /// Stale calendar: a source is configured and no reading has fully worked
@@ -627,28 +637,14 @@ struct Sources {
     }
 
     static func runCommand(_ cmd: String) -> Result<String, Failure> {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/bash")
-        p.arguments = ["-lc", cmd]
-        let out = Pipe(), err = Pipe(); p.standardOutput = out; p.standardError = err
-        do { try p.run() } catch { return .failure(Failure(description: "\(error)")) }
         // A hung command must not freeze the calendar for good: 60 s, then it is killed.
-        let deadline = DispatchWorkItem { if p.isRunning { p.terminate() } }
-        DispatchQueue.global().asyncAfter(deadline: .now() + 60, execute: deadline)
-        defer { deadline.cancel() }
-        // Drain stderr in parallel: a chatty command that fills the stderr pipe
-        // would otherwise block forever while we wait on stdout.
-        nonisolated(unsafe) var errData = Data()
-        let g = DispatchGroup(); g.enter()
-        DispatchQueue.global().async { errData = err.fileHandleForReading.readDataToEndOfFile(); g.leave() }
-        let d = out.fileHandleForReading.readDataToEndOfFile()
-        g.wait()
-        p.waitUntilExit()
-        if p.terminationStatus != 0 {
-            let e = String(decoding: errData, as: UTF8.self)
-            return .failure(Failure(description: Schedule.L("exited with ", "saiu com ") + "\(p.terminationStatus): \(e.suffix(200))"))
+        let r = Runner.run("/bin/bash", ["-lc", cmd], limit: 60, mergeErr: false)
+        if let e = r.launchError { return .failure(Failure(description: e)) }
+        if r.timedOut { return .failure(Failure(description: Schedule.L("no answer in 60 s; stopped", "sem resposta em 60 s; interrompido"))) }
+        if r.status != 0 {
+            return .failure(Failure(description: Schedule.L("exited with ", "saiu com ") + "\(r.status): \(r.err.suffix(200))"))
         }
-        return .success(String(decoding: d, as: UTF8.self))
+        return .success(r.out)
     }
 
     /// When the last reading with every source answering happened (epoch
@@ -660,7 +656,12 @@ struct Sources {
     }
     func writeLastOk(_ d: Date) { try? String(Int(d.timeIntervalSince1970)).write(toFile: okFile, atomically: true, encoding: .utf8) }
 
-    func readCache() -> [Meeting] { Schedule.deserialize((try? String(contentsOfFile: cacheFile, encoding: .utf8)) ?? "") }
+    /// Only meetings of sources still configured: a calendar the person
+    /// removed must not keep recording from the cache for days.
+    func readCache() -> [Meeting] {
+        let c = configured
+        return Schedule.deserialize((try? String(contentsOfFile: cacheFile, encoding: .utf8)) ?? "").filter { c.contains($0.source) }
+    }
     func writeCache(_ es: [Meeting]) { try? Schedule.serialize(es).write(toFile: cacheFile, atomically: true, encoding: .utf8) }
 
     /// What "Connect calendar" accepts: an https or webcal address with a host.
@@ -712,5 +713,45 @@ struct Sources {
             return .failure(Failure(description: Schedule.L("could not save ", "não consegui salvar ") + urlFile))
         }
         return .success(r.meetings.filter { $0.end > now }.count)
+    }
+}
+
+/// Runs a program with a deadline. Waiting for the pipe to close is not enough:
+/// a child left in the background (or a wedged ffmpeg under the script) keeps
+/// it open, and the caller, the app's "busy" included, would wait forever.
+/// On the deadline the program and its direct children get SIGTERM and the
+/// caller gets what was printed so far, with timedOut set.
+enum Runner {
+    struct Result { var out = "", err = "", status: Int32 = -1, timedOut = false, launchError: String? = nil }
+    final class Box: @unchecked Sendable {
+        let lock = NSLock(); var data = Data()
+        func add(_ d: Data) { lock.lock(); data.append(d); lock.unlock() }
+        var text: String { lock.lock(); defer { lock.unlock() }; return String(decoding: data, as: UTF8.self) }
+    }
+    static func run(_ exe: String, _ args: [String], env: [String: String]? = nil, limit: TimeInterval, mergeErr: Bool = true) -> Result {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: exe); p.arguments = args
+        if let env = env { p.environment = env }
+        let out = Pipe(), err = mergeErr ? out : Pipe()
+        p.standardOutput = out; p.standardError = err
+        do { try p.run() } catch { return Result(launchError: "\(error)") }
+        let o = Box(), e = Box(), g = DispatchGroup()
+        for (pipe, box) in mergeErr ? [(out, o)] : [(out, o), (err, e)] {
+            g.enter()
+            let h = pipe.fileHandleForReading
+            DispatchQueue.global().async {
+                while true { let d = h.availableData; if d.isEmpty { break }; box.add(d) }
+                g.leave()
+            }
+        }
+        if g.wait(timeout: .now() + limit) == .timedOut {
+            let kill = Process()
+            kill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill"); kill.arguments = ["-TERM", "-P", String(p.processIdentifier)]
+            try? kill.run(); kill.waitUntilExit()
+            if p.isRunning { p.terminate() }
+            return Result(out: o.text, err: e.text, status: -1, timedOut: true)
+        }
+        p.waitUntilExit()
+        return Result(out: o.text, err: e.text, status: p.terminationStatus)
     }
 }

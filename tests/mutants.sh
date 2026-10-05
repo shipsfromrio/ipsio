@@ -41,6 +41,10 @@ mutant "connect saves world-readable" 'O_WRONLY | O_CREAT | O_EXCL, 0o600)' 'O_W
 mutant "connect accepts plain http" 'guard u.lowercased().hasPrefix("https://"),' 'guard u.lowercased().hasPrefix("http"),'
 mutant "stale clock never fires" 'return now.timeIntervalSince(lastOk ?? start) > limit' 'return now.timeIntervalSince(lastOk ?? start) > limit * 100'
 mutant "stale clock ignores the last success" 'return now.timeIntervalSince(lastOk ?? start) > limit' 'return now.timeIntervalSince(start) > limit'
+mutant "the meeting recording is cut by an overlap" 'if now < cur.end { return cur }' ''
+mutant "a covered invite starts after the call" '$0.id != c && $0.end > cur.end' '$0.id != c'
+mutant "a removed calendar records from the cache" '.filter { c.contains($0.source) }' ''
+mutant "the runner ignores its deadline" 'g.wait(timeout: .now() + limit)' 'g.wait(timeout: .now() + limit * 100)'
 echo
 [ "$ALIVE" -eq 0 ] && echo "all mutants killed" || echo "$ALIVE mutant(s) alive"
 [ "$ALIVE" -eq 0 ]

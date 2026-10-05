@@ -33,6 +33,14 @@ cat > "$BIN/ffmpeg" <<'EOF'
 # Double: lists devices from $STUB/devices; when recording, writes samples to
 # the meter files (file=...) and stays alive until signalled.
 for a in "$@"; do [ "$a" = "-list_devices" ] && { cat "$STUB/devices" >&2; exit 1; }; done
+# Measuring a finished file (check, test): volumedetect answers and exits.
+# Track 2 is the microphone; $STUB/vd and $STUB/vd_mic set the means.
+case " $* " in *" volumedetect "*)
+  v=$(cat "$STUB/vd" 2>/dev/null || echo -20.0); case " $* " in *" 0:a:2 "*) v=$(cat "$STUB/vd_mic" 2>/dev/null || echo -30.0);; esac
+  printf '[Parsed_volumedetect_0] mean_volume: %s dB
+[Parsed_volumedetect_0] max_volume: -3.0 dB
+' "$v" >&2; exit 0;;
+esac
 echo "$*" > "$STUB/ffmpeg-args"
 for a in "$@"; do
   # Pure bash, no fork per argument: forks are slow on some hosts, and stop
@@ -47,6 +55,12 @@ for a in "$@"; do
   done
 done
 echo "frame=  10 fps=12 time=00:00:05.00 bitrate=1k" >&2
+# $STUB/slow_close: on SIGINT it keeps writing the file for 8 s, then marks it closed.
+if [ -f "$STUB/slow_close" ]; then
+  out=""; for a in "$@"; do case "$a" in *.mkv) out="$a";; esac; done
+  export out
+  exec perl -e '$SIG{INT}=sub{ for (1..8) { open(F,">>",$ENV{out}); print F "x"; close F; sleep 1 } open(F,">>",$ENV{out}); print F "closed"; close F; exit 0 }; $SIG{TERM}=sub{exit 0}; sleep 1 while 1'
+fi
 exec perl -e '$SIG{INT}=sub{exit 0}; $SIG{TERM}=sub{exit 0}; sleep 1 while 1'
 EOF
 cat > "$BIN/ffprobe" <<'EOF'
@@ -194,6 +208,61 @@ F=$(printf '%s\n' "$S" | sed -n 's/^#state .* file=//p')
 for _ in $(seq 1 20); do [ -s "$F.sha256" ] && break; sleep 0.5; done
 [ -s "$F.sha256" ] && ok "without a hook the hash is still written" || fail "without a hook the hash is still written"
 grep -q POST_RECORDING "$ROOT/home/.ipsio/post-recording.log" 2>/dev/null && fail "no hook configured, nothing run" || ok "no hook configured, nothing run"
+
+# A file still being closed after SIGINT is waited for while it grows, not killed at 5 s.
+scenario; touch "$STUB/slow_close"; run start >/dev/null
+S=$(run stop); F=$(printf '%s
+' "$S" | sed -n 's/^#state .* file=//p')
+case "$(cat "$F" 2>/dev/null)" in *closed) ok "stop waits for a file that is still closing";; *) fail "stop waits for a file that is still closing" "$(cat "$F" 2>/dev/null)";; esac
+
+# The state folder is created private (conf may hold a token).
+scenario; rm -rf "$ROOT/home/.ipsio"; run start >/dev/null
+case "$(uname)" in Darwin|Linux) same "start creates the state folder readable only by its owner" "$(ls -ld "$ROOT/home/.ipsio" | cut -c1-10)" "drwx------";; esac
+run stop >/dev/null
+
+# A meter that stops getting samples while ffmpeg lives is silence, not
+# "measuring" forever nor the last good value.
+scenario; run start >/dev/null
+has "a fresh meter reads normally" "$(run level)" "verdict=OK"
+touch -t 202001010000 "$ROOT/home/.ipsio/level"
+S=$(run level)
+has "a frozen meter is no sound" "$S" "verdict=NO_SOUND"
+case "$S" in *"silence=0 "*) fail "a frozen meter counts its age as silence";; *) ok "a frozen meter counts its age as silence";; esac
+run stop >/dev/null
+scenario; : > "$STUB/sys"; run start >/dev/null
+has "an empty meter in the first seconds is measuring" "$(run level)" "verdict=MEASURING"
+touch -t 202001010000 "$ROOT/home/.ipsio/level" "$ROOT/home/.ipsio/pid"
+has "an empty meter after 20 s is no sound" "$(run level)" "verdict=NO_SOUND"
+run stop >/dev/null
+
+# A second stop (the app runs one at launch when the output is stuck on
+# Ipsio) must not save the last recording again nor re-run the hook on it.
+scenario
+printf '#!/bin/bash
+echo run >> "%s/hook-count"
+' "$ROOT" > "$ROOT/hook.sh"; chmod +x "$ROOT/hook.sh"; rm -f "$ROOT/hook-count"
+conf "POST_RECORDING='$ROOT/hook.sh'"
+run start >/dev/null; run stop >/dev/null; S=$(run stop)
+has "a second stop says nothing was recording" "$S" "verdict=NOT_RECORDING"
+for _ in $(seq 1 20); do [ -s "$ROOT/hook-count" ] && break; sleep 0.5; done; sleep 1
+same "a second stop does not re-run the hook" "$(wc -l < "$ROOT/hook-count" 2>/dev/null | tr -d ' ')" "1"
+
+# test: the 10 s take is measured, deleted, and never handed to the hook.
+scenario; rm -f "$ROOT/hook-count"; conf "POST_RECORDING='$ROOT/hook.sh'"
+S=$(run test)
+has "test passes with sound on the take" "$S" "verdict=TEST_OK"
+sleep 2
+[ -e "$ROOT/hook-count" ] && fail "test does not run the hook on its take" || ok "test does not run the hook on its take"
+[ -z "$(find "$ROOT/home" -name '*test*' 2>/dev/null)" ] && ok "test leaves no take nor .sha256 behind" || fail "test leaves no take nor .sha256 behind" "$(find "$ROOT/home" -name '*test*')"
+scenario; echo "-inf" > "$STUB/vd"
+has "test with a silent take says no sound" "$(run test)" "verdict=TEST_NO_SOUND"
+scenario; conf "MODE='meeting'"; echo "-inf" > "$STUB/vd_mic"
+has "test in meeting mode with a dead microphone says so" "$(run test)" "verdict=TEST_NO_MICROPHONE"
+
+# check measures the file being recorded
+scenario; run start >/dev/null
+has "check measures the recording" "$(run check)" "verdict=OK mean=-20.0"
+run stop >/dev/null
 
 # ------------------------------------------ meeting, digitally silent mic ---
 scenario; conf "MODE='meeting'"; echo "-inf" > "$STUB/mic"
