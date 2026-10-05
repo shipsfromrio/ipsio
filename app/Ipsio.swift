@@ -97,6 +97,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     var skipped = Set<String>()
     var calendarReadAt: Date?
     var calendarErrors: [String] = []
+    let appStart = Date()                      // the stale clock with no success on record
+    var staleAlerted = false                   // one notification per stale episode
     var calendarWarnings: [String] = []
     var readingCalendar = false
     var calendarFailure: [String: Date] = [:]   // id -> last attempt that failed
@@ -156,6 +158,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "connect_fail_title": "A agenda não foi conectada", "connect_fail_body": "%@\n\nNada foi trocado: continua valendo a agenda anterior, se havia uma.",
             "connect_button": "Conectar",
             "connect_replaces": "Atenção: hoje há %@ endereços em calendar.url, e este substitui todos.",
+            "calendar_stale": "⚠ Agenda sem atualizar desde %@", "calendar_never": "a abertura do app",
+            "calendar_stale_title": "A agenda parou de atualizar",
+            "calendar_stale_body": "A leitura falha desde %@. O Ipsio segue gravando pela última leitura, mas reunião marcada depois disso não entra. Motivo: %@",
             "setup_title": "Configurar o Ipsio",
             "setup_intro": "O Ipsio precisa destes itens para gravar. Cada linha fica verde sozinha quando ficar pronta: pode resolver na ordem que quiser.",
             "setup_zoom": "Falta só você, uma vez: no Zoom, Teams ou Meet, escolha o alto-falante \"%@\".",
@@ -227,6 +232,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "connect_fail_title": "The calendar was not connected", "connect_fail_body": "%@\n\nNothing was replaced: the previous calendar, if any, still applies.",
             "connect_button": "Connect",
             "connect_replaces": "Note: calendar.url holds %@ addresses today, and this one replaces all of them.",
+            "calendar_stale": "⚠ Calendar not updated since %@", "calendar_never": "the app opened",
+            "calendar_stale_title": "The calendar stopped updating",
+            "calendar_stale_body": "Reading has failed since %@. Ipsio keeps recording from the last reading, but a meeting added after that will be missed. Reason: %@",
             "setup_title": "Set up Ipsio",
             "setup_intro": "Ipsio needs these to record. Each line turns green by itself once it is ready, so fix them in any order.",
             "setup_zoom": "One thing only you can do, once: in Zoom, Teams or Meet, pick the speaker \"%@\".",
@@ -558,7 +566,11 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         if sources.configured.isEmpty { calendarStatus.isHidden = true }
         else {
             calendarStatus.isHidden = false
+            let lastOk = sources.readLastOk()
             if let m = readMarker(), on { calendarStatus.title = t("recording_calendar", m.title) }
+            else if Schedule.stale(configured: true, lastOk: lastOk, start: appStart, now: Date()) {
+                calendarStatus.title = t("calendar_stale", lastOk.map { when($0) } ?? t("calendar_never"))
+            }
             else if !calendarAuto { calendarStatus.title = t("calendar_off") }
             else if let p = Schedule.upcoming(now: Date(), meetings: meetings, after: 0, n: 20).first(where: { !skipped.contains($0.id) && $0.start > Date() }) {
                 calendarStatus.title = t("next", when(p.start) + " · " + p.title)
@@ -719,6 +731,16 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
                 self.readingCalendar = false
                 self.meetings = merged; self.calendarErrors = r.errors; self.calendarWarnings = r.warnings
                 self.calendarReadAt = Date()
+                // Only a reading where EVERY source answered resets the stale clock.
+                if r.errors.isEmpty && !r.sourcesOk.isEmpty { sources.writeLastOk(Date()) }
+                let lastOk = sources.readLastOk()
+                if Schedule.stale(configured: true, lastOk: lastOk, start: self.appStart, now: Date()) {
+                    if !self.staleAlerted {
+                        self.staleAlerted = true
+                        self.notify(self.t("calendar_stale_title"),
+                                    self.t("calendar_stale_body", lastOk.map { self.when($0) } ?? self.t("calendar_never"), r.errors.first ?? "-"))
+                    }
+                } else { self.staleAlerted = false }
                 self.writeSkipped()
                 self.refresh()
             }

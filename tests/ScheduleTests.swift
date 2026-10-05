@@ -258,6 +258,21 @@ struct ScheduleTests {
         if case .failure = missing { check(true, "a missing local .ics is an error, not an empty calendar") }
         else { check(false, "a missing local .ics is an error, not an empty calendar") }
 
+        // ------------------------------------------------------ stale calendar ---
+        let t0 = at("2026-10-05 08:00")
+        check(!Schedule.stale(configured: false, lastOk: nil, start: t0, now: at("2026-10-06 08:00")), "no calendar is never stale")
+        check(!Schedule.stale(configured: true, lastOk: at("2026-10-05 09:00"), start: t0, now: at("2026-10-05 10:59")), "read 1h59 ago is fresh")
+        check(Schedule.stale(configured: true, lastOk: at("2026-10-05 09:00"), start: t0, now: at("2026-10-05 11:01")), "read 2h01 ago is stale")
+        check(!Schedule.stale(configured: true, lastOk: nil, start: t0, now: at("2026-10-05 09:00")), "never read, launched 1 h ago: not yet")
+        check(Schedule.stale(configured: true, lastOk: nil, start: t0, now: at("2026-10-05 10:30")), "never read, launched 2h30 ago: stale")
+        let sdir = NSTemporaryDirectory() + "ipsio-stale-\(getpid())"
+        try? FileManager.default.createDirectory(atPath: sdir, withIntermediateDirectories: true)
+        let ss = Sources(dir: sdir, conf: [:])
+        check(ss.readLastOk() == nil, "no success on record reads as nil")
+        ss.writeLastOk(at("2026-10-05 09:00"))
+        check(ss.readLastOk() == at("2026-10-05 09:00"), "the last success survives a restart")
+        try? FileManager.default.removeItem(atPath: sdir)
+
         // ------------------------------------------------- connect calendar ---
         check(Sources.normalizeAddress(" webcal://calendar.example.com/x/basic.ics ") == "https://calendar.example.com/x/basic.ics", "webcal becomes https, spaces trimmed")
         check(Sources.normalizeAddress("http://calendar.example.com/x.ics") == nil, "plain http is refused")

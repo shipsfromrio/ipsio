@@ -107,7 +107,9 @@ from 2 minutes before the start to 5 minutes after the end, in meeting mode.
 Back-to-back meetings become two files: when the second one starts, the first
 one closes. A recording started by hand is never stopped or replaced by the
 calendar. If a reading fails (network, for example), the last good reading
-still counts, and the menu says since when. With a meeting in the next 15
+still counts, and the menu says since when. After 2 hours without a full
+reading, the menu line turns into a warning and a notification says why: a
+meeting added since would be missed. With a meeting in the next 15
 minutes the Mac does not idle-sleep.
 
 Sources (you can use more than one; no credential lives in the code):

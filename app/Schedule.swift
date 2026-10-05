@@ -436,6 +436,15 @@ enum Schedule {
         return inside.max { a, b in a.start != b.start ? a.start < b.start : a.id > b.id }
     }
 
+    /// Stale calendar: a source is configured and no reading has fully worked
+    /// for `limit` (2 h; it is read every 5 min). Recording goes on from the
+    /// cache, but a meeting added since would be missed in silence, so the app
+    /// says so. With no success on record, the clock starts at `start` (launch).
+    static func stale(configured: Bool, lastOk: Date?, start: Date, now: Date, limit: TimeInterval = 7200) -> Bool {
+        guard configured else { return false }
+        return now.timeIntervalSince(lastOk ?? start) > limit
+    }
+
     /// The next n that will be (or are being) recorded, in order.
     static func upcoming(now: Date, meetings: [Meeting], after: TimeInterval, n: Int) -> [Meeting] {
         Array(meetings.filter { $0.end.addingTimeInterval(after) > now }.sorted { ($0.start, $0.id) < ($1.start, $1.id) }.prefix(n))
@@ -588,6 +597,15 @@ struct Sources {
         }
         return .success(String(decoding: d, as: UTF8.self))
     }
+
+    /// When the last reading with every source answering happened (epoch
+    /// seconds in a file, so a restart does not reset the stale clock).
+    var okFile: String { dir + "/calendar-ok-at" }
+    func readLastOk() -> Date? {
+        guard let s = try? String(contentsOfFile: okFile, encoding: .utf8), let v = Double(s.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
+        return Date(timeIntervalSince1970: v)
+    }
+    func writeLastOk(_ d: Date) { try? String(Int(d.timeIntervalSince1970)).write(toFile: okFile, atomically: true, encoding: .utf8) }
 
     func readCache() -> [Meeting] { Schedule.deserialize((try? String(contentsOfFile: cacheFile, encoding: .utf8)) ?? "") }
     func writeCache(_ es: [Meeting]) { try? Schedule.serialize(es).write(toFile: cacheFile, atomically: true, encoding: .utf8) }

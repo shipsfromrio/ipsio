@@ -104,7 +104,9 @@ A cada 5 minutos o app lê as fontes configuradas. Cada reunião é gravada de
 reuniões seguidas viram dois arquivos: quando a segunda começa, a primeira
 fecha. Gravação começada à mão nunca é parada nem trocada pela agenda. Se a
 leitura falhar (rede, por exemplo), vale a última lida, e o menu diz desde
-quando. Com reunião nos próximos 15 minutos o Mac não entra em repouso por
+quando. Depois de 2 horas sem uma leitura completa, a linha do menu vira aviso e
+uma notificação diz o motivo: reunião marcada depois disso não entraria. Com
+reunião nos próximos 15 minutos o Mac não entra em repouso por
 ociosidade.
 
 Fontes (pode usar mais de uma; nenhuma credencial fica no código):
