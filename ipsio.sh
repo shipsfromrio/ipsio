@@ -444,7 +444,9 @@ case "$1" in
     [ -n "$WARN" ] && echo "$WARN"
     echo ""
     t detail "$(t detail_start "$PID" "$(SwitchAudioSource -c -t output)" "${FREE:-?}" "$MODE")"
-    state verdict=RECORDING mode="$MODE" microphone=$([ "$MICOK" = 0 ] && echo DEAD || echo OK) battery=$([ -n "$WARN" ] && echo 1 || echo 0) file="$OUT"
+    MSTATE=OK; [ "$MICOK" = 0 ] && MSTATE=DEAD
+    BATT=0; [ -n "$WARN" ] && BATT=1
+    state verdict=RECORDING mode="$MODE" microphone="$MSTATE" battery="$BATT" file="$OUT"
     ;;
   level)
     # Reads the LAST sample of the live meter. Cheap: one grep.
@@ -551,7 +553,7 @@ case "$1" in
     # only proves the Mac -> BlackHole path (and, in meeting mode, the
     # microphone); the speaker inside Zoom/Teams is proven live, on the day.
     if recording; then t already_recording; state verdict=ALREADY_RECORDING; exit 1; fi
-    S=$(IPSIO_TITLE=test bash "$0" start); RC=$?
+    S=$(IPSIO_TITLE="test" bash "$0" start); RC=$?
     if [ $RC -ne 0 ]; then echo "$S"; exit $RC; fi
     MICN=$(microphone)
     sleep 2

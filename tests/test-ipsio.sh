@@ -94,7 +94,7 @@ chmod +x "$BIN"/*
 
 # scenario: clean state and a "good" Mac (everything present).
 scenario() {
-  rm -rf "$ROOT/home" "$STUB"/*; mkdir -p "$ROOT/home/.ipsio" "$STUB"
+  rm -rf "${ROOT:?}/home" "${STUB:?}"/*; mkdir -p "$ROOT/home/.ipsio" "$STUB"
   cat > "$STUB/devices" <<'EOF'
 [AVFoundation indev @ 0x1] AVFoundation video devices:
 [AVFoundation indev @ 0x1] [0] FaceTime HD Camera
