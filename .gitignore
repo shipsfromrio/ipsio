@@ -1,0 +1,4 @@
+.claude/
+*.bak
+.DS_Store
+/build/

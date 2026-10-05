@@ -1,0 +1,37 @@
+name: ci
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  shell:
+    name: bash -n, shellcheck and script bench (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: for f in *.sh tests/*.sh; do bash -n "$f" || exit 1; done
+      - run: shellcheck --version && shellcheck -S warning *.sh tests/*.sh
+      - run: bash tests/test-ipsio.sh
+
+  macos:
+    name: build and test on macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: script bench on macOS bash 3.2
+        run: /bin/bash tests/test-ipsio.sh
+      - name: build the app, ipsio-calendar and the device creator
+        run: |
+          swiftc --version
+          swiftc -O -parse-as-library app/Schedule.swift app/Ipsio.swift -framework AppKit -o "$RUNNER_TEMP/Ipsio"
+          swiftc -O -parse-as-library app/Schedule.swift app/CalendarCLI.swift -o "$RUNNER_TEMP/ipsio-calendar"
+          swiftc -O tools/create-device.swift -o "$RUNNER_TEMP/create-device"
+      - name: calendar bench
+        run: |
+          swiftc -parse-as-library app/Schedule.swift tests/ScheduleTests.swift -o "$RUNNER_TEMP/schedule-tests"
+          "$RUNNER_TEMP/schedule-tests"
+      - name: mutants (the bench fails a broken calendar)
+        run: bash tests/mutants.sh
