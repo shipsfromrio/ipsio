@@ -663,7 +663,7 @@ Free download with a 7-day trial, every feature included. Then one non-consumabl
 Thank you.
 ```
 
-Atenção: o texto completo de `docs/store/review-notes.md` tem 5638 bytes e **não cabe**. O bloco acima é a versão curta, com os mesmos passos de teste e de compra. Cole este.
+O bloco acima é o mesmo texto de `docs/store/review-notes.md`, que cabe no limite. Cole este.
 
 **Attachment**: nenhum.
 

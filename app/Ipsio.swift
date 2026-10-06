@@ -351,18 +351,23 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     var calendarAuto: Bool { (readConf()["CALENDAR_AUTO"] ?? "1") != "0" }
     func minutes(_ k: String, _ fallback: Double) -> TimeInterval { (Double(readConf()[k] ?? "") ?? fallback) * 60 }
 
-    func applicationDidFinishLaunching(_ n: Notification) {
-        // A single instance: a kickstart on top of an app opened outside launchd
-        // once left two circles in the bar.
-        if let bid = Bundle.main.bundleIdentifier {
-            // A relaunch after a permission waits (up to 5 s) for the old copy to quit.
-            if CommandLine.arguments.contains("--relaunched") {
-                for _ in 0..<50 where NSRunningApplication.runningApplications(withBundleIdentifier: bid).filter({ !$0.isTerminated }).count > 1 {
-                    Thread.sleep(forTimeInterval: 0.1)
-                }
-            }
-            if NSRunningApplication.runningApplications(withBundleIdentifier: bid).filter({ !$0.isTerminated }).count > 1 { NSApp.terminate(nil); return }
-        }
+    func applicationDidFinishLaunching(_ n: Notification) { singleInstance(tries: 6) }
+
+    /// A single instance: a kickstart on top of an app opened outside launchd
+    /// once left two circles in the bar. Another copy still there waits (up to
+    /// 6 s, the run loop running so the list of apps refreshes) before giving
+    /// up: a relaunch after a permission starts while the old copy quits.
+    /// (Measured: the sandbox drops launch arguments, so the new copy cannot be told.)
+    func singleInstance(tries: Int) {
+        let bid = Bundle.main.bundleIdentifier ?? ""
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: bid)
+            .filter { !$0.isTerminated && $0.processIdentifier != getpid() }
+        if bid.isEmpty || others.isEmpty { launch(); return }
+        if tries == 0 { NSApp.terminate(nil); return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.singleInstance(tries: tries - 1) }
+    }
+
+    func launch() {
         // Private, like install-app.sh makes it: conf may hold a token in
         // CALENDAR_COMMAND, and the cache has meeting titles and links.
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -812,7 +817,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         #if STORE
         guard !relaunching else { return }
         relaunching = true
-        let c = NSWorkspace.OpenConfiguration(); c.createsNewApplicationInstance = true; c.arguments = ["--relaunched"]
+        let c = NSWorkspace.OpenConfiguration(); c.createsNewApplicationInstance = true
         NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: c) { _, err in
             DispatchQueue.main.async { if err == nil { NSApp.terminate(nil) } else { self.relaunching = false } }
         }
