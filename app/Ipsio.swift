@@ -72,6 +72,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     let hotKeysItem = NSMenuItem(title: "", action: #selector(doHotKeys), keyEquivalent: "")
     let searchItem = NSMenuItem(title: "", action: #selector(doSearch), keyEquivalent: "")
     let detectItem = NSMenuItem(title: "", action: #selector(doDetectToggle), keyEquivalent: "")
+    let consentItem = NSMenuItem(title: "", action: #selector(doConsent), keyEquivalent: "")
     // Our own action, not the system's terminate:: on macOS 26 the standard quit
     // action gets an automatic icon, which opens an icon column and indents the
     // whole menu.
@@ -142,6 +143,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "search_one": "1 resultado. Duplo clique mostra a gravação e copia o tempo.",
             "search_many": "%@ resultados. Duplo clique mostra a gravação e copia o tempo.",
             "search_gone": "A gravação não está mais na pasta.", "search_copied": "Tempo %@ copiado.",
+            "report_make": "Relatório de integridade (PDF)", "report_making": "Fazendo o relatório…",
+            "report_done": "Relatório de integridade pronto", "report_failed": "O relatório não foi feito",
             "hotkeys": "Atalhos ⌃⌥⌘R (gravar/parar) e ⌃⌥⌘T (testar)",
             "login": "Abrir ao iniciar a sessão", "login_failed": "O macOS não aceitou o item de login",
             "language": "Switch to English  🇺🇸", "restart": "Reiniciar o app", "quit": "Sair (até o próximo login)",
@@ -233,6 +236,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "search_one": "1 result. Double-click shows the recording and copies the time.",
             "search_many": "%@ results. Double-click shows the recording and copies the time.",
             "search_gone": "The recording is no longer in the folder.", "search_copied": "Time %@ copied.",
+            "report_make": "Integrity report (PDF)", "report_making": "Making the report…",
+            "report_done": "Integrity report ready", "report_failed": "The report was not made",
             "hotkeys": "Shortcuts ⌃⌥⌘R (record/stop) and ⌃⌥⌘T (test)",
             "login": "Open at login", "login_failed": "macOS refused the login item",
             "language": "Mudar para português  🇧🇷", "restart": "Restart the app", "quit": "Quit (until next login)",
@@ -343,12 +348,12 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         // Without this NSMenu re-enables every item that has an action by
         // itself, and "Record" stayed clickable during a recording.
         for m in [menu, recentMenu, upcomingMenu, modeMenu, permMenu] { m.autoenablesItems = false }
-        for m in [recordItem, stopItem, checkItem, testItem, modeClass, modeMeeting, titleItem, folderItem, openItem, permScreen, permMic, doctorItem, connectItem, languageItem, hotKeysItem, searchItem, detectItem, restartItem, quitItem, loginItem, buyItem, restoreItem] { m.target = self }
+        for m in [recordItem, stopItem, checkItem, testItem, modeClass, modeMeeting, titleItem, folderItem, openItem, permScreen, permMic, doctorItem, connectItem, languageItem, hotKeysItem, searchItem, detectItem, consentItem, restartItem, quitItem, loginItem, buyItem, restoreItem] { m.target = self }
         licenseItem.isEnabled = false
         statusItem.isEnabled = false; calendarStatus.isEnabled = false
         menu.addItem(statusItem); menu.addItem(calendarStatus); menu.addItem(.separator())
         menu.addItem(recordItem); menu.addItem(stopItem); menu.addItem(checkItem); menu.addItem(testItem); menu.addItem(.separator())
-        modeMenu.addItem(modeClass); modeMenu.addItem(modeMeeting); modeItem.submenu = modeMenu; menu.addItem(modeItem)
+        modeMenu.addItem(modeClass); modeMenu.addItem(modeMeeting); modeItem.submenu = modeMenu; menu.addItem(modeItem); menu.addItem(consentItem)
         upcomingItem.submenu = upcomingMenu; menu.addItem(upcomingItem)
         recentItem.submenu = recentMenu; menu.addItem(recentItem); menu.addItem(searchItem)
         menu.addItem(openItem); menu.addItem(titleItem); menu.addItem(folderItem)
@@ -396,6 +401,29 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         if !CGPreflightScreenCaptureAccess() { askScreenPermission() }
         openSetupIfNeeded()
         startHotKeys()
+    }
+
+    // ---- consent reminder (app/Consent.swift) and integrity report (app/Report.swift) ----
+    var consentReminded = Set<String>()   // calendar events already reminded in this run
+    @objc func doConsent() {
+        var c = readConf(); c[Consent.confKey] = Consent.enabled(c) ? "0" : "1"; writeConf(c); refresh()
+    }
+    var reporting = Set<String>()
+    /// Hashes the whole file: off the main thread. Never writes the recording or its .sha256.
+    @objc func doReport(_ s: NSMenuItem) {
+        guard let u = s.representedObject as? URL, !reporting.contains(u.path) else { return }
+        let path = u.path, language = lang, name = u.lastPathComponent
+        reporting.insert(path)
+        DispatchQueue.global(qos: .utility).async {
+            let outcome = Result { try Report.write(media: path, lang: language) }
+            DispatchQueue.main.async {
+                self.reporting.remove(path)
+                switch outcome {
+                case .success(let pdf): self.notify(self.t("report_done"), name, file: pdf)
+                case .failure(let e): self.alert(self.t("report_failed"), name + "\n\n" + "\(e)")
+                }
+            }
+        }
     }
 
     // ---- an open call (app/MeetingDetect.swift) and search (app/Search.swift) ----
@@ -498,7 +526,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     func userNotificationCenter(_ c: UNUserNotificationCenter, willPresent n: UNNotification, withCompletionHandler h: @escaping (UNNotificationPresentationOptions) -> Void) { h([.banner, .sound]) }
     // Clicking the "saved" notification shows the recording in Finder.
     func userNotificationCenter(_ c: UNUserNotificationCenter, didReceive r: UNNotificationResponse, withCompletionHandler h: @escaping () -> Void) {
-        if r.actionIdentifier == "ipsio.record" {
+        if let n = r.notification.request.content.userInfo["consent"] as? String {
+            NSPasteboard.general.clearContents(); NSPasteboard.general.setString(n, forType: .string)
+        } else if r.actionIdentifier == "ipsio.record" {
             // A call: record it with the microphone, like a calendar meeting.
             DispatchQueue.main.async { if !self.recording() && !self.busy { self.startRecording(mode: "meeting") } }
         } else if let p = r.notification.request.content.userInfo["file"] as? String, FileManager.default.fileExists(atPath: p) {
@@ -551,6 +581,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             // Not during a recording: the capture comes first.
             tr.target = self; tr.representedObject = u; tr.isEnabled = !busyHere && !recording()
             sub.addItem(tr)
+            let rep = NSMenuItem(title: reporting.contains(u.path) ? t("report_making") : t("report_make"), action: #selector(doReport(_:)), keyEquivalent: "")
+            rep.target = self; rep.representedObject = u; rep.isEnabled = !reporting.contains(u.path)
+            sub.addItem(rep)
             if done {
                 let open = NSMenuItem(title: t("open_transcript"), action: #selector(doOpenTranscript(_:)), keyEquivalent: "")
                 open.target = self; open.representedObject = u; sub.addItem(open)
@@ -705,7 +738,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         permItem.title = t("perm"); permScreen.title = t("perm_screen"); permMic.title = t("perm_mic")
         doctorItem.title = t("doctor"); doctorItem.isEnabled = !busy
         connectItem.title = Sources(dir: dir, conf: readConf()).configured.contains { $0 == "ics" || $0 == "macos" } ? t("connect_again") : t("connect")
-        languageItem.title = t("language"); hotKeysItem.title = t("hotkeys"); searchItem.title = t("search_menu"); detectItem.title = t("detect_menu"); detectItem.state = readConf()["DETECT_MEETINGS"] == "0" ? .off : .on; hotKeysItem.state = HotKeys.enabled(readConf()["HOTKEYS"]) ? .on : .off; restartItem.title = t("restart"); quitItem.title = t("quit")
+        languageItem.title = t("language"); hotKeysItem.title = t("hotkeys"); searchItem.title = t("search_menu"); detectItem.title = t("detect_menu"); consentItem.title = Consent.t("menu", lang: lang); consentItem.state = Consent.enabled(readConf()) ? .on : .off; detectItem.state = readConf()["DETECT_MEETINGS"] == "0" ? .off : .on; hotKeysItem.state = HotKeys.enabled(readConf()["HOTKEYS"]) ? .on : .off; restartItem.title = t("restart"); quitItem.title = t("quit")
         // The recording lives in this process now: restarting would cut it.
         restartItem.isEnabled = !on && !busy
         loginItem.title = t("login"); loginItem.state = loginOn ? .on : .off
@@ -774,7 +807,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
                         a.informativeText = self.t("died_body", log)
                         a.addButton(withTitle: self.t("record_again")); a.addButton(withTitle: self.t("ok"))
                         return a
-                    }) { if $0 == .alertFirstButtonReturn { self.doRecord() } }
+                    }) { if $0 == .alertFirstButtonReturn { self.startRecording(mode: self.mode, askConsent: false) } }
                 }
             }
             return
@@ -951,6 +984,17 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
                 // could be a manual recording that began meanwhile.
                 if s.state["verdict"] == "RECORDING" && self.recording() {
                     self.writeMarker(e)
+                    if Consent.shouldRemind(enabled: Consent.enabled(self.readConf()), mode: mode, trigger: .calendar, eventID: e.id,
+                                            alreadyReminded: self.consentReminded) == .notification {
+                        self.consentReminded.insert(e.id)
+                        let notice = Consent.text(lang: self.lang, mode: mode)
+                        if self.notificationsOk && self.hasBundle {
+                            let c = UNMutableNotificationContent()
+                            c.title = Consent.t("notif_title", lang: self.lang); c.body = Consent.t("notif_body", notice, lang: self.lang)
+                            c.userInfo = ["consent": notice]
+                            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil))
+                        } else { self.notify(Consent.t("notif_title", lang: self.lang), Consent.t("notif_body", notice, lang: self.lang)) }
+                    }
                     self.calendarFailure[e.id] = nil
                     if s.state["microphone"] == "DEAD" || s.state["battery"] == "1" { self.alert(s.title, s.body) }
                     else { self.notify(self.t("notif_calendar"), self.t("notif_calendar_body", e.title, self.shortTime(e.end)), file: s.state["file"]) }
@@ -992,9 +1036,26 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
 
     // ---- actions ----
     @objc func doRecord() { startRecording(mode: mode) }
-    func startRecording(mode m: String) {
+    func startRecording(mode m: String, askConsent: Bool = true) {
         guard licenseAllows(explain: true) else { refresh(); return }
         guard permissionsOk(explain: true, meeting: m == "meeting") else { refresh(); return }
+        // A click records only after the consent reminder (app/Consent.swift).
+        if askConsent, Consent.shouldRemind(enabled: Consent.enabled(readConf()), mode: m, trigger: .manual, eventID: nil, alreadyReminded: consentReminded) == .dialog {
+            NSApp.activate(ignoringOtherApps: true)
+            let notice = Consent.text(lang: lang, mode: m)
+            let a = NSAlert()
+            a.messageText = Consent.t("dialog_title", lang: lang)
+            a.informativeText = Consent.t("dialog_body", notice, lang: lang)
+            for b in Consent.buttons(lang: lang) { a.addButton(withTitle: b) }
+            let r = a.runModal()
+            switch Consent.choice(button: r.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue) {
+            case .copyAndRecord: NSPasteboard.general.clearContents(); NSPasteboard.general.setString(notice, forType: .string)
+            case .record: break
+            case .cancel: refresh(); return
+            }
+            // The popup took time: a calendar start or the hot key may have won meanwhile.
+            guard !recording(), !busy else { refresh(); return }
+        }
         alarmGiven = false; micAlarmGiven = false
         busy = true; refresh()
         DispatchQueue.global().async {

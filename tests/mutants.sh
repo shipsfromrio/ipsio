@@ -126,18 +126,20 @@ transcribe_mutant Transcript.swift "the overlap keeps words twice" 'let lo = i =
 transcribe_mutant Transcript.swift "the microphone is the others" 'case (2, 1), (3, 2): return .me' 'case (2, 1), (3, 2): return .others'
 transcribe_mutant Transcript.swift "the script's mix is transcribed" 'case (1, 0), (2, 0), (3, 1): return .others' 'case (1, 0), (2, 0), (3, 0), (3, 1): return .others'
 transcribe_mutant Export.swift "a transcript may overwrite the evidence" 'if kinds.contains(ext) || ext == "sha256" { throw Failure.refused(media) }' ''
-# Meeting detection and search: one file of app/ against its own bench.
+# One file of app/ against its own bench (with Files.swift for the evidence hash):
+# meeting detection, search, the consent reminder and the integrity report.
 app_mutant() { # <file in app> <bench in tests> <name> <original text> <broken text>
-  python3 - "$ROOT/app/$1" "$T/$1" "$4" "$5" <<'PY' || { echo "ERROR: the snippet for mutant '$3' is no longer in $1"; ALIVE=$((ALIVE+1)); return; }
+  mkdir -p "$T/app"
+  python3 - "$ROOT/app/$1" "$T/app/$1" "$4" "$5" <<'PY' || { echo "ERROR: the snippet for mutant '$3' is no longer in $1"; ALIVE=$((ALIVE+1)); return; }
 import sys
 src, dst, a, b = sys.argv[1:5]
 s = open(src, encoding="utf-8").read()
 if a not in s: sys.exit(1)
 open(dst, "w", encoding="utf-8").write(s.replace(a, b, 1))
 PY
-  if ! swiftc -parse-as-library "$T/$1" "$ROOT/tests/$2" -o "$T/a" 2>"$T/err"; then
+  if ! swiftc -parse-as-library "$T/app/$1" "$ROOT/app/Engine/Files.swift" "$ROOT/tests/$2" -o "$T/ap" 2>"$T/err"; then
     echo "ERROR: mutant '$3' does not compile"; tail -3 "$T/err"; ALIVE=$((ALIVE+1)); return; fi
-  if "$T/a" >/dev/null 2>&1; then echo "SURVIVED: $3"; ALIVE=$((ALIVE+1)); else echo "killed: $3"; fi
+  if "$T/ap" >/dev/null 2>&1; then echo "SURVIVED: $3"; ALIVE=$((ALIVE+1)); else echo "killed: $3"; fi
 }
 D=MeetingDetectTests.swift
 app_mutant MeetingDetect.swift $D "Zoom running counts as a meeting" 'if zoom.contains(id) {' 'if zoom.contains(id) { if true { return Meeting(app: "Zoom", key: "zoom") }'
@@ -160,6 +162,19 @@ app_mutant Search.swift $D "file names are not searched" 'if matches((name as NS
 app_mutant Search.swift $D "the offset drops the hours" 'return (h * 3600 + m * 60 + s,' 'return (h * 0 + m * 60 + s,'
 app_mutant Search.swift $D "the speaker label is searched" 'guard let p = parse(line), matches(p.text, q) else { continue }' 'guard let p = parse(line), matches(line, q) else { continue }'
 app_mutant Search.swift $D "a hit points at the .txt next to a recording" 'let shown = r.entry.media ?? r.entry.txt!' 'let shown = r.entry.txt ?? r.entry.media!'
+app_mutant Consent.swift ConsentTests.swift "a calendar recording shows a popup" 'return .notification' 'return .dialog'
+app_mutant Consent.swift ConsentTests.swift "the test take reminds" 'case .test: return .none' 'case .test: return .dialog'
+app_mutant Consent.swift ConsentTests.swift "turned off still reminds" 'guard enabled else { return .none }' ''
+app_mutant Consent.swift ConsentTests.swift "the same meeting is reminded at every restart" 'if let id = eventID, alreadyReminded.contains(id) { return .none }' ''
+app_mutant Consent.swift ConsentTests.swift "class mode gets the meeting notice" 'mode == "class" ? "notice_class"' 'mode == "lecture" ? "notice_class"'
+app_mutant Consent.swift ConsentTests.swift "the reminder is off by default" 'conf[confKey] != "0"' 'conf[confKey] == "1"'
+app_mutant Report.swift ReportTests.swift "the PDF omits the hash" 'draw(isCode(f.value) ? attr(f.value, font: "Menlo-Regular"' 'draw(isCode(f.value) ? attr("", font: "Menlo-Regular"'
+app_mutant Report.swift ReportTests.swift "a report for the evidence file itself" 'guard recordings.contains(ext) else { throw Failure.refused(path) }' ''
+app_mutant Report.swift ReportTests.swift "the report is written over the recording" '{ (media as NSString).deletingPathExtension + ".integrity.pdf" }' '{ media }'
+app_mutant Report.swift ReportTests.swift "a different .sha256 reads as a match" 'return hex == n ? .match(n)' 'return true ? .match(n)'
+app_mutant Report.swift ReportTests.swift "a missing .sha256 is invented" 'guard let ev = evidence else' 'guard let ev = evidence ?? now.map({ "\($0)  \(name)" }) else'
+app_mutant Report.swift ReportTests.swift "a .sha256 of another file is accepted" 'named == name else' 'true else'
+app_mutant Report.swift ReportTests.swift "a copy's creation date wins over the name" 'c >= n && c < n.addingTimeInterval(60)' 'c >= n'
 echo
 [ "$ALIVE" -eq 0 ] && echo "all mutants killed" || echo "$ALIVE mutant(s) alive"
 [ "$ALIVE" -eq 0 ]
