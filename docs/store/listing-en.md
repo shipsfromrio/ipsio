@@ -104,7 +104,7 @@ notification reminds you, and a click copies the notice.
 TRANSCRIPTION ON YOUR MAC
 Each recording becomes a transcript with who spoke: you from the microphone
 track, the others from the computer track. Speech is recognized on this Mac,
-never on a server.
+never on a server (macOS may first download the language from Apple).
 
 ## What's new (version 1.0)
 

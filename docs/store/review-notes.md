@@ -88,8 +88,12 @@ are refused: a recording in progress always finishes and is saved.
 
 To test the purchase, use a sandbox Apple Account. No account of ours
 exists.
-1. On a fresh install, the bottom of the menu shows "Trial: 7 days left",
-   "Buy Ipsio lifetime (US$ 19.99)..." and "Restore purchase".
+1. On a fresh install, before the trial starts, a window states its terms:
+   7 days with every feature, then no new recordings until the one-time
+   purchase "Ipsio lifetime", with "Start the 7 days", "Buy now" and
+   "Restore purchase". The trial starts when that window is answered.
+   Then the bottom of the menu shows "Trial: 7 days left",
+   "Buy Ipsio lifetime (<local price>)..." and "Restore purchase".
 2. "Buy Ipsio lifetime" opens the App Store payment sheet; confirm with the
    sandbox account. A "THANK YOU" message appears and those three lines leave
    the menu: the app is unlocked.

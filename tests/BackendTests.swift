@@ -171,10 +171,30 @@ struct BackendTests {
             check(o.state["battery"] == "1" && o.body.contains("BATTERY"), "on battery: battery=1 and the warning")
         }
         for (f, v) in [(Recorder.Failure.noDisplay, "NO_SCREEN"), (.noPermission, "NO_PERMISSION"), (.folder("x"), "FOLDER_INACCESSIBLE"),
-                       (.start("boom"), "DID_NOT_START"), (.writer("w"), "DID_NOT_START")] {
+                       (.start("boom"), "DID_NOT_START"), (.writer("w"), "DID_NOT_START"), (.microphone("no Microphone permission"), "DID_NOT_START")] {
             let (b, cap, _) = fixture(); cap.startResult = .failure(f)
             let o = parse(b.run("start"))
             check(o.state["verdict"] == v && b.currentFile == nil, "capture failure \(f) -> \(v), no file record", "\(o.state)")
+        }
+        for lang in ["en", "pt"] {
+            let (b, cap, _) = fixture(conf: ["MODE": "meeting", "UI_LANGUAGE": lang]); cap.startResult = .failure(.microphone("no Microphone permission"))
+            let o = parse(b.run("start"))
+            check(o.state["verdict"] == "DID_NOT_START" && o.title == (lang == "en" ? "DID NOT START" : "NÃO COMEÇOU")
+                  && o.body.contains("the microphone did not open: no Microphone permission") && !b.recording && b.currentFile == nil,
+                  "\(lang): a microphone that does not open fails the meeting's start, with the reason", "\(o.title) | \(o.body)")
+        }
+        let fmic = Backend.failed(.microphone("busy"), folder: "/f")
+        check(fmic.key == "did_not_start" && fmic.verdict == "DID_NOT_START" && fmic.args == ["the microphone did not open: busy"], "the microphone failure maps to did_not_start with its reason")
+        check(Backend.failed(.folder("x"), folder: "/f").args == ["/f"] && Backend.failed(.windowGone, folder: "/f").verdict == "WINDOW_GONE",
+              "the other failures keep their own verdicts")
+        do {
+            let (b, cap, _) = fixture(conf: ["MODE": "meeting"])
+            _ = b.run("start", env: ["IPSIO_MIC": "avcapture"])
+            check(cap.lastOptions?.micSource == .avcapture, "IPSIO_MIC=avcapture reaches the capture")
+            _ = b.run("stop"); _ = b.run("start")
+            check(cap.lastOptions?.micSource == .auto, "without it: the default microphone path")
+            _ = b.run("stop"); _ = b.run("start", env: ["IPSIO_MIC": "yes"])
+            check(cap.lastOptions?.micSource == .auto, "IPSIO_MIC with another word: the default")
         }
         do {
             let (b, _, _) = fixture(conf: ["RECORDINGS_DIR": "/dev/null/nope"])

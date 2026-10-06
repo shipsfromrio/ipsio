@@ -107,6 +107,9 @@ struct LicenseRecord {
         return d
     }
 
+    /// Never launched on this Mac: no file and no stored first launch.
+    var isNew: Bool { readFile().first == nil && defaultsDate(Self.firstKey) == nil }
+
     /// The state for this launch: touch, then the state machine.
     func state(now: Date, purchased: Bool, build: LicenseBuild) -> LicenseState {
         let d = touch(now: now)
@@ -168,6 +171,10 @@ enum LicenseTexts {
         "menu_trial_one": "Trial: last day",
         "menu_expired": "Trial ended",
         "menu_buy": "Buy Ipsio lifetime (%1)...",
+        "menu_buy_noprice": "Buy Ipsio lifetime...",
+        "notice": "7 DAYS FREE, EVERY FEATURE\nIpsio starts a 7-day free trial now, with every feature. When it ends, Ipsio no longer starts new recordings until you buy Ipsio lifetime: one purchase through the App Store, no subscription. A recording in progress always finishes, and your recordings stay yours. Already bought it? Choose Restore purchase.",
+        "notice_start": "Start the 7 days",
+        "notice_buy": "Buy now",
         "menu_restore": "Restore purchase",
         "purchased": "THANK YOU\nIpsio is unlocked for good on this Apple Account.",
         "purchase_pending": "PURCHASE PENDING\nThe App Store has not confirmed the purchase yet (it may need approval). Ipsio unlocks by itself when it does.",
@@ -183,6 +190,10 @@ enum LicenseTexts {
         "menu_trial_one": "Avaliação: último dia",
         "menu_expired": "Avaliação encerrada",
         "menu_buy": "Comprar Ipsio vitalício (%1)...",
+        "menu_buy_noprice": "Comprar Ipsio vitalício...",
+        "notice": "7 DIAS GRÁTIS, COM TUDO\nO Ipsio começa agora uma avaliação grátis de 7 dias, com todas as funções. Quando ela acabar, o Ipsio não começa gravações novas até a compra do Ipsio vitalício: uma compra única pela App Store, sem assinatura. Uma gravação em andamento sempre termina, e as suas gravações continuam suas. Já comprou? Escolha Restaurar compra.",
+        "notice_start": "Começar os 7 dias",
+        "notice_buy": "Comprar agora",
         "menu_restore": "Restaurar compra",
         "purchased": "OBRIGADO\nO Ipsio está liberado para sempre nesta Conta Apple.",
         "purchase_pending": "COMPRA PENDENTE\nA App Store ainda não confirmou a compra (pode precisar de aprovação). O Ipsio se libera sozinho quando ela confirmar.",

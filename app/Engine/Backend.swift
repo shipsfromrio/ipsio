@@ -121,6 +121,7 @@ final class Backend {
     struct Settings {
         let lang: String, folder: String, title: String, mode: String, minGB: Int, hookCommand: String
         let quality: Quality, target: CaptureTarget
+        let micSource: Recorder.MicSource
     }
     func settings(_ env: [String: String]) -> Settings {
         let c = conf()
@@ -135,7 +136,8 @@ final class Backend {
                         mode: m == "meeting" ? "meeting" : "class",
                         minGB: q.minFreeGB(Int(c["MIN_FREE_GB"] ?? "") ?? 20, meeting: m == "meeting"),
                         hookCommand: c["POST_RECORDING"] ?? "",
-                        quality: q, target: target)
+                        quality: q, target: target,
+                        micSource: Recorder.MicSource.parse(env["IPSIO_MIC"]))
     }
 
     /// "about 2 GB per hour" for normal, as the text always said.
@@ -179,6 +181,20 @@ final class Backend {
         return Sound.dB(p)
     }
 
+    /// A start that failed: the text the app shows, its arguments and the verdict.
+    /// A microphone that does not open is a start that did not happen, with
+    /// the reason, like any capture that did not start.
+    static func failed(_ e: Recorder.Failure, folder: String) -> (key: String, args: [String], verdict: String) {
+        switch e {
+        case .noPermission: return ("no_permission", [], "NO_PERMISSION")
+        case .noDisplay: return ("no_screen", [], "NO_SCREEN")
+        case .folder: return ("folder_inaccessible", [folder], "FOLDER_INACCESSIBLE")
+        case .alreadyRecording: return ("already_recording", [], "ALREADY_RECORDING")
+        case .windowGone: return ("window_gone", [], "WINDOW_GONE")
+        case .microphone, .start, .writer, .windowClosed: return ("did_not_start", ["\(e)"], "DID_NOT_START")
+        }
+    }
+
     // ---- the commands ----
     func run(_ cmd: String, env: [String: String] = [:]) -> String {
         lock.lock(); defer { lock.unlock() }
@@ -219,18 +235,13 @@ final class Backend {
         let battery = host.onBattery()
         var o = Recorder.Options(folder: s.folder); o.title = s.title; o.meeting = meeting
         o.fps = s.quality.fps; o.videoBitrate = s.quality.videoBitrate; o.target = s.target
+        o.micSource = s.micSource
         let path: String
         switch capture.startAndWait(o, timeout: 30) {
         case .success(let p): path = p
         case .failure(let e):
-            switch e {
-            case .noPermission: return t("no_permission") + "\n" + Backend.state([("verdict", "NO_PERMISSION")])
-            case .noDisplay: return t("no_screen") + "\n" + Backend.state([("verdict", "NO_SCREEN")])
-            case .folder: return t("folder_inaccessible", s.folder) + "\n" + Backend.state([("verdict", "FOLDER_INACCESSIBLE")])
-            case .alreadyRecording: return t("already_recording") + "\n" + Backend.state([("verdict", "ALREADY_RECORDING")])
-            case .windowGone: return t("window_gone") + "\n" + Backend.state([("verdict", "WINDOW_GONE")])
-            default: return t("did_not_start", "\(e)") + "\n" + Backend.state([("verdict", "DID_NOT_START")])
-            }
+            let f = Backend.failed(e, folder: s.folder)
+            return Texts.t(f.key, f.args, lang: s.lang) + "\n" + Backend.state([("verdict", f.verdict)])
         }
         recQuality = s.quality
         try? (path + "\n").write(toFile: fileRec, atomically: true, encoding: .utf8)

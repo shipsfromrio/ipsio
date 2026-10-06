@@ -16,7 +16,7 @@ final class Writer {
     private let micIn: AVAssetWriterInput?
     private(set) var started = false
     private(set) var sessionStart: CMTime?
-    private(set) var dropped = 0          // buffers refused because the input was busy
+    private(set) var dropped = 0          // buffers lost: input busy, refused, or a late microphone
 
     struct Settings {
         var width: Int, height: Int
@@ -59,9 +59,17 @@ final class Writer {
     func appendSystem(_ sb: CMSampleBuffer) { if started { append(sb, systemIn) } }
     func appendMic(_ sb: CMSampleBuffer) { if started, let m = micIn { append(sb, m) } }
 
+    /// A buffer the capture could not hand over (a clock it could not convert).
+    func drop() { dropped += 1 }
+
+    /// Stamped before the file's start. Computer sound there is the normal
+    /// lead-in before the first frame; a microphone buffer there after the
+    /// start is a lost one, so it counts.
+    static func early(_ pts: CMTime, _ start: CMTime?) -> Bool { pts < (start ?? .zero) }
+
     private func append(_ sb: CMSampleBuffer, _ i: AVAssetWriterInput) {
         guard writer.status == .writing else { return }
-        if CMSampleBufferGetPresentationTimeStamp(sb) < (sessionStart ?? .zero) { return }
+        if Writer.early(CMSampleBufferGetPresentationTimeStamp(sb), sessionStart) { if i === micIn { dropped += 1 }; return }
         if i.isReadyForMoreMediaData { if !i.append(sb) { dropped += 1 } } else { dropped += 1 }
     }
 
