@@ -4,6 +4,7 @@
 //   swiftc -O -parse-as-library app/Engine/*.swift tools/NativeCLI.swift -o /tmp/ipsio-native
 //   IPSIO_DIR=/tmp/x /tmp/ipsio-native doctor start sleep:10 level check stop test
 // The conf is $IPSIO_DIR/conf (KEY='value' lines), as for the app.
+// IPSIO_TARGET=window:<id> records one window for this run (CAPTURE_TARGET keeps a display).
 import Foundation
 
 @main
@@ -25,7 +26,7 @@ struct NativeCLI {
         let dir = ProcessInfo.processInfo.environment["IPSIO_DIR"] ?? (NSHomeDirectory() + "/.ipsio")
         let b = Backend(dir: dir, capture: Recorder(), conf: { conf(dir) })
         var env: [String: String] = [:]
-        for k in ["IPSIO_TITLE", "IPSIO_MODE"] { if let v = ProcessInfo.processInfo.environment[k] { env[k] = v } }
+        for k in ["IPSIO_TITLE", "IPSIO_MODE", "IPSIO_TARGET"] { if let v = ProcessInfo.processInfo.environment[k] { env[k] = v } }
         for a in args {
             if a.hasPrefix("sleep:"), let s = Double(a.dropFirst(6)) { Thread.sleep(forTimeInterval: s); continue }
             print("== \(a)")

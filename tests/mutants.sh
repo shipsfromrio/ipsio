@@ -126,6 +126,22 @@ transcribe_mutant Transcript.swift "the overlap keeps words twice" 'let lo = i =
 transcribe_mutant Transcript.swift "the microphone is the others" 'case (2, 1), (3, 2): return .me' 'case (2, 1), (3, 2): return .others'
 transcribe_mutant Transcript.swift "the script's mix is transcribed" 'case (1, 0), (2, 0), (3, 1): return .others' 'case (1, 0), (2, 0), (3, 0), (3, 1): return .others'
 transcribe_mutant Export.swift "a transcript may overwrite the evidence" 'if kinds.contains(ext) || ext == "sha256" { throw Failure.refused(media) }' ''
+# Quality presets and what to record.
+BENCH=(tests/CaptureTests.swift)
+engine_mutant Quality.swift "an unknown quality records high" '?? .normal' '?? .high'
+engine_mutant Quality.swift "the normal preset changes its fps" 'case .normal: return 12;' 'case .normal: return 15;'
+engine_mutant Quality.swift "a meeting counts one audio track" '(meeting ? 2 : 1)' '(meeting ? 1 : 1)'
+engine_mutant Target.swift "a window gone records the whole screen" '? .window(id) : .windowGone' '? .window(id) : main(false)'
+engine_mutant Target.swift "a display gone is an error instead of main" '? .display(id, fellBack: false) : main(true)' '? .display(id, fellBack: false) : .noDisplay'
+engine_mutant Target.swift "a display gone falls back silently" '? .display(id, fellBack: false) : main(true)' '? .display(id, fellBack: false) : main(false)'
+engine_mutant Target.swift "a window is written to the conf" 'case .window: return nil' 'case .window(let id): return "window:\(id)"'
+engine_mutant Target.swift "a window keeps odd or oversized sides" 'return Recorder.fit(px(width), px(height))' 'return (px(width), px(height))'
+BENCH=(app/Setup.swift tests/BackendTests.swift)
+engine_mutant Backend.swift "the preset never reaches the capture" 'o.fps = s.quality.fps; o.videoBitrate = s.quality.videoBitrate; ' ''
+engine_mutant Backend.swift "the disk minimum ignores the preset" 'minGB: q.minFreeGB(Int(c["MIN_FREE_GB"] ?? "") ?? 20, meeting: m == "meeting"),' 'minGB: Int(c["MIN_FREE_GB"] ?? "") ?? 20,'
+engine_mutant Backend.swift "a window in the conf is honored" 'CaptureTarget.parse(oneShot: env["IPSIO_TARGET"]) ?? CaptureTarget.parse(conf: c["CAPTURE_TARGET"])' 'CaptureTarget.parse(oneShot: env["IPSIO_TARGET"] ?? c["CAPTURE_TARGET"]) ?? .main'
+engine_mutant Backend.swift "a gone window reads as a failed start" '            case .windowGone: return t("window_gone")' '            case .noDisplay where false: return t("window_gone")'
+engine_mutant Backend.swift "a display fallback is not said" 'target = "main_fallback"; out.append(t("display_gone"))' 'target = "main"'
 echo
 [ "$ALIVE" -eq 0 ] && echo "all mutants killed" || echo "$ALIVE mutant(s) alive"
 [ "$ALIVE" -eq 0 ]

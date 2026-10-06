@@ -46,6 +46,10 @@ jobs:
         run: |
           swiftc -parse-as-library app/Engine/*.swift app/Setup.swift tests/BackendTests.swift -o "$RUNNER_TEMP/backend-tests"
           "$RUNNER_TEMP/backend-tests"
+      - name: capture bench (quality presets, what to record)
+        run: |
+          swiftc -parse-as-library app/Engine/*.swift tests/CaptureTests.swift -o "$RUNNER_TEMP/capture-tests"
+          "$RUNNER_TEMP/capture-tests"
       - name: transcription bench (windows, overlap, speakers, exports)
         run: |
           swiftc -parse-as-library app/Transcribe/*.swift tests/TranscribeTests.swift -o "$RUNNER_TEMP/transcribe-tests"

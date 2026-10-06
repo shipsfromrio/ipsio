@@ -22,7 +22,10 @@ protocol Capture: AnyObject {
     func startAndWait(_ o: Recorder.Options, timeout: Double) -> Result<String, Recorder.Failure>
     func snapshot() -> Recorder.Snapshot?
     func stop() -> Recorder.Summary?
+    /// What the last start recorded; nil when the capture cannot tell.
+    var resolvedTarget: CaptureTarget.Resolved? { get }
 }
+extension Capture { var resolvedTarget: CaptureTarget.Resolved? { nil } }
 extension Recorder: Capture {}
 
 /// The Mac around the capture. Defaults are the real thing.
@@ -86,6 +89,7 @@ final class Backend {
     var host: Host
     let conf: () -> [String: String]
     private var activity: NSObjectProtocol?
+    private var recQuality: Quality?   // the preset of the recording in progress
     private let lock = NSLock()   // one command at a time, like one script run per click
 
     init(dir: String, capture: Capture, host: Host = Host(), conf: @escaping () -> [String: String]) {
@@ -116,18 +120,26 @@ final class Backend {
     // ---- what the conf and the environment decide ----
     struct Settings {
         let lang: String, folder: String, title: String, mode: String, minGB: Int, hookCommand: String
+        let quality: Quality, target: CaptureTarget
     }
     func settings(_ env: [String: String]) -> Settings {
         let c = conf()
         let l = c["UI_LANGUAGE"].flatMap { $0.isEmpty ? nil : $0 } ?? host.systemLanguage()
         let m = env["IPSIO_MODE"] ?? c["MODE"] ?? "class"
+        let q = Quality.parse(c["VIDEO_QUALITY"])
+        // A window comes only for one start (IPSIO_TARGET); the conf keeps a display.
+        let target = CaptureTarget.parse(oneShot: env["IPSIO_TARGET"]) ?? CaptureTarget.parse(conf: c["CAPTURE_TARGET"])
         return Settings(lang: l == "en" ? "en" : "pt",
                         folder: c["RECORDINGS_DIR"].flatMap { $0.isEmpty ? nil : $0 } ?? (NSHomeDirectory() + "/Movies/Ipsio"),
                         title: Naming.title(env["IPSIO_TITLE"] ?? c["TITLE"] ?? ""),
                         mode: m == "meeting" ? "meeting" : "class",
-                        minGB: Int(c["MIN_FREE_GB"] ?? "") ?? 20,
-                        hookCommand: c["POST_RECORDING"] ?? "")
+                        minGB: q.minFreeGB(Int(c["MIN_FREE_GB"] ?? "") ?? 20, meeting: m == "meeting"),
+                        hookCommand: c["POST_RECORDING"] ?? "",
+                        quality: q, target: target)
     }
+
+    /// "about 2 GB per hour" for normal, as the text always said.
+    static func perHour(_ s: Settings) -> String { String(format: "%.0f", s.quality.gbPerHour(meeting: s.mode == "meeting")) }
 
     // ---- formatting, the script's way ----
     static func state(_ pairs: [(String, String)]) -> String {
@@ -198,7 +210,7 @@ final class Backend {
         }
         let free = host.freeGB(s.folder)
         if let f = free, f < s.minGB {
-            return t("disk_full", String(f), s.folder, String(s.minGB)) + "\n" + Backend.state([("verdict", "DISK_FULL"), ("free_gb", String(f))])
+            return t("disk_full", String(f), s.folder, String(s.minGB), Backend.perHour(s)) + "\n" + Backend.state([("verdict", "DISK_FULL"), ("free_gb", String(f))])
         }
         guard host.screenPermission() else { return t("no_permission") + "\n" + Backend.state([("verdict", "NO_PERMISSION")]) }
         let meeting = s.mode == "meeting"
@@ -206,6 +218,7 @@ final class Backend {
         if meeting && micName == nil { return t("no_microphone") + "\n" + Backend.state([("verdict", "NO_MICROPHONE")]) }
         let battery = host.onBattery()
         var o = Recorder.Options(folder: s.folder); o.title = s.title; o.meeting = meeting
+        o.fps = s.quality.fps; o.videoBitrate = s.quality.videoBitrate; o.target = s.target
         let path: String
         switch capture.startAndWait(o, timeout: 30) {
         case .success(let p): path = p
@@ -215,9 +228,11 @@ final class Backend {
             case .noDisplay: return t("no_screen") + "\n" + Backend.state([("verdict", "NO_SCREEN")])
             case .folder: return t("folder_inaccessible", s.folder) + "\n" + Backend.state([("verdict", "FOLDER_INACCESSIBLE")])
             case .alreadyRecording: return t("already_recording") + "\n" + Backend.state([("verdict", "ALREADY_RECORDING")])
+            case .windowGone: return t("window_gone") + "\n" + Backend.state([("verdict", "WINDOW_GONE")])
             default: return t("did_not_start", "\(e)") + "\n" + Backend.state([("verdict", "DID_NOT_START")])
             }
         }
+        recQuality = s.quality
         try? (path + "\n").write(toFile: fileRec, atomically: true, encoding: .utf8)
         try? (s.mode + "\n").write(toFile: modeRec, atomically: true, encoding: .utf8)
         // caffeinate -dimsu: the display too, or ScreenCaptureKit stops with it.
@@ -240,10 +255,17 @@ final class Backend {
         else if meeting { out.append(t("recording_meeting", name, micName ?? "")) }
         else { out.append(t("recording", name)) }
         if battery { out.append(t("battery_warning")) }
+        let target: String
+        switch capture.resolvedTarget {
+        case .display(_, fellBack: true)?: target = "main_fallback"; out.append(t("display_gone"))
+        case .window?: target = "window"
+        default:
+            switch s.target { case .main: target = "main"; case .display: target = "display"; case .window: target = "window" }
+        }
         out.append("")
         out.append(t("detail", t("detail_start", free.map(String.init) ?? "?", s.mode)))
         out.append(Backend.state([("verdict", "RECORDING"), ("mode", s.mode), ("microphone", micOk ? "OK" : "DEAD"),
-                                  ("battery", battery ? "1" : "0"), ("file", path)]))
+                                  ("battery", battery ? "1" : "0"), ("quality", s.quality.rawValue), ("target", target), ("file", path)]))
         return out.joined(separator: "\n")
     }
 
@@ -251,7 +273,7 @@ final class Backend {
         guard let snap = capture.snapshot() else { return t("not_recording") + "\n" + Backend.state([("verdict", "NOT_RECORDING")]) }
         let mode = snap.mic != nil ? "meeting" : "class"
         let time = Backend.clock(snap.seconds), size = Backend.fileSize(snap.file)
-        let free = host.freeGB(s.folder), hours = (free ?? 0) * 10 / 18
+        let free = host.freeGB(s.folder), hours = (recQuality ?? s.quality).hoursLeft(freeGB: free ?? 0, meeting: mode == "meeting")
         let l = snap.level
         var st: [(String, String)] = [("verdict", l.verdict), ("mode", mode), ("silence", String(l.silence)),
                                        ("time", time), ("size", size), ("disk_h", String(hours))]
@@ -288,6 +310,7 @@ final class Backend {
         let fm = FileManager.default
         let left = currentFile
         let sum = capture.stop()
+        recQuality = nil
         if let a = activity { ProcessInfo.processInfo.endActivity(a); activity = nil }
         // Forget the file once it is dealt with: a second stop must not save it
         // again nor run the hook on it twice.
@@ -389,7 +412,7 @@ final class Backend {
         if (try? fm.createDirectory(atPath: s.folder, withIntermediateDirectories: true)) != nil {
             good("folder", s.folder)
             let free = host.freeGB(s.folder)
-            if let f = free, f < s.minGB { bad("disk", t("disk_full", String(f), s.folder, String(s.minGB))) }
+            if let f = free, f < s.minGB { bad("disk", t("disk_full", String(f), s.folder, String(s.minGB), Backend.perHour(s))) }
             else { good("disk", "\(free.map(String.init) ?? "?") GB") }
         } else { bad("folder", t("folder_inaccessible", s.folder)) }
         let c = conf()

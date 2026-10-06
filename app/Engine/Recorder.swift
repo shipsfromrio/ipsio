@@ -14,6 +14,7 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudio
         var meeting = false            // microphone in its own track
         var fps = 12
         var videoBitrate = 4_000_000
+        var target = CaptureTarget.main
     }
     struct Summary {
         let file: String
@@ -32,6 +33,7 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudio
     }
     enum Failure: Error, CustomStringConvertible {
         case noDisplay, noPermission, folder(String), writer(String), start(String), alreadyRecording
+        case windowGone, windowClosed(String)
         var description: String {
             switch self {
             case .noDisplay: return "no display to record"
@@ -40,6 +42,8 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudio
             case .writer(let s): return "the file could not be created: \(s)"
             case .start(let s): return "the capture did not start: \(s)"
             case .alreadyRecording: return "already recording"
+            case .windowGone: return "the chosen window is no longer open"
+            case .windowClosed(let s): return "the recorded window was closed, or macOS stopped its capture: \(s)"
             }
         }
     }
@@ -55,6 +59,9 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudio
     /// Set when the system stopped the capture (display asleep, permission
     /// revoked, another app took the screen): the app's watchdog reads it.
     private(set) var stoppedByItself: Error?
+    /// What the last start recorded (a display that fell back to main shows here).
+    private(set) var resolvedTarget: CaptureTarget.Resolved?
+    private var windowMode = false
 
     var recording: Bool { q.sync { writer != nil } }
 
@@ -73,12 +80,23 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudio
         do { try FileManager.default.createDirectory(atPath: o.folder, withIntermediateDirectories: true) }
         catch { done(.failure(.folder("\(error)"))); return }
         SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { content, error in
-            let mainID = CGMainDisplayID()
-            guard let display = content?.displays.first(where: { $0.displayID == mainID }) ?? content?.displays.first else {
-                done(.failure(error == nil ? .noDisplay : .noPermission)); return
+            guard let content = content else { done(.failure(error == nil ? .noDisplay : .noPermission)); return }
+            let resolved = CaptureTarget.resolve(o.target, displays: content.displays.map { $0.displayID }, mainID: CGMainDisplayID(),
+                                                 windows: content.windows.map { $0.windowID })
+            let filter: SCContentFilter, w: Int, h: Int
+            switch resolved {
+            case .noDisplay: done(.failure(.noDisplay)); return
+            case .windowGone: done(.failure(.windowGone)); return
+            case .window(let id):
+                guard let win = content.windows.first(where: { $0.windowID == id }) else { done(.failure(.windowGone)); return }
+                filter = SCContentFilter(desktopIndependentWindow: win)
+                (w, h) = CaptureTarget.windowSize(width: Double(win.frame.width), height: Double(win.frame.height), scale: Recorder.scale(filter, win.frame))
+            case .display(let id, _):
+                guard let display = content.displays.first(where: { $0.displayID == id }) else { done(.failure(.noDisplay)); return }
+                filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
+                let mode = CGDisplayCopyDisplayMode(display.displayID)
+                (w, h) = Recorder.fit(mode?.pixelWidth ?? display.width * 2, mode?.pixelHeight ?? display.height * 2)
             }
-            let mode = CGDisplayCopyDisplayMode(display.displayID)
-            let (w, h) = Recorder.fit(mode?.pixelWidth ?? display.width * 2, mode?.pixelHeight ?? display.height * 2)
             let cfg = SCStreamConfiguration()
             cfg.width = w; cfg.height = h
             cfg.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(o.fps))
@@ -91,7 +109,7 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudio
             let w2: Writer
             do { w2 = try Writer(url: URL(fileURLWithPath: path), .init(width: w, height: h, fps: o.fps, videoBitrate: o.videoBitrate, microphone: o.meeting)) }
             catch { done(.failure(.writer("\(error)"))); return }
-            let s = SCStream(filter: SCContentFilter(display: display, excludingApplications: [], exceptingWindows: []), configuration: cfg, delegate: self)
+            let s = SCStream(filter: filter, configuration: cfg, delegate: self)
             do {
                 try s.addStreamOutput(self, type: .screen, sampleHandlerQueue: self.q)
                 try s.addStreamOutput(self, type: .audio, sampleHandlerQueue: self.q)
@@ -101,6 +119,8 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudio
                 self.writer = w2; self.file = path; self.stream = s
                 self.system = Meter(); self.mic = o.meeting ? Meter() : nil
                 self.startHost = Recorder.now(); self.lastPTS = .invalid; self.stoppedByItself = nil
+                self.resolvedTarget = resolved
+                if case .window = resolved { self.windowMode = true } else { self.windowMode = false }
             }
             if o.meeting && !micInStream { self.startMicSession() }
             s.startCapture { e in
@@ -112,6 +132,16 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudio
                 done(.success(path))
             }
         }
+    }
+
+    /// Pixels per point for a window: the filter's on macOS 14+, else the
+    /// display under the window's center (2 when unknown, like a Retina screen).
+    private static func scale(_ f: SCContentFilter, _ frame: CGRect) -> Double {
+        if #available(macOS 14.0, *) { return Double(f.pointPixelScale) }
+        var id: CGDirectDisplayID = 0, n: UInt32 = 0
+        guard CGGetDisplaysWithPoint(CGPoint(x: frame.midX, y: frame.midY), 1, &id, &n) == .success, n == 1,
+              let mode = CGDisplayCopyDisplayMode(id), mode.width > 0 else { return 2 }
+        return Double(mode.pixelWidth) / Double(mode.width)
     }
 
     /// macOS 13 and 14: the microphone through AVFoundation, on the same queue.
@@ -131,7 +161,11 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudio
         case .screen:
             // Only complete frames carry an image; an unchanged screen sends none.
             guard let att = CMSampleBufferGetSampleAttachmentsArray(sb, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
-                  let raw = att.first?[.status] as? Int, SCFrameStatus(rawValue: raw) == .complete else { return }
+                  let raw = att.first?[.status] as? Int, let st = SCFrameStatus(rawValue: raw) else { return }
+            // A recorded window that closes: the stream says stopped. Same path
+            // as a system stop (the watchdog saves the file).
+            if st == .stopped, windowMode, stoppedByItself == nil { stoppedByItself = Failure.windowClosed("the window is gone") }
+            guard st == .complete else { return }
             w.appendVideo(sb); note(sb)
         case .audio:
             w.appendSystem(sb); feed(&system, sb); note(sb)
@@ -150,7 +184,9 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudio
         let t = CMSampleBufferGetPresentationTimeStamp(sb) + CMSampleBufferGetDuration(sb)
         if !lastPTS.isValid || t > lastPTS { lastPTS = t }
     }
-    func stream(_ s: SCStream, didStopWithError error: Error) { q.async { self.stoppedByItself = error } }
+    func stream(_ s: SCStream, didStopWithError error: Error) {
+        q.async { self.stoppedByItself = self.windowMode ? Failure.windowClosed("\(error)") : error }
+    }
 
     /// What the app's alarm reads every few seconds.
     func level() -> Level? { snapshot()?.level }
