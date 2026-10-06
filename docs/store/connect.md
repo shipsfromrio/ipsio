@@ -20,10 +20,14 @@ Dois sites:
 
 Onde: https://developer.apple.com/programs/enroll
 
-- Inscreva-se como **Individual** (pessoa física).
+- Inscreva-se como **Organization** (empresa), com a Conta Apple criada para as lojas.
+- Precisa do **D-U-N-S** da empresa (Dun & Bradstreet, grátis, de 7 a 14 dias úteis fora dos EUA). O nome e o endereço no D-U-N-S têm que bater com os do cadastro na Apple.
+- A empresa precisa de um site público no próprio domínio, e a Conta Apple de um e-mail desse domínio.
+- Quem se inscreve precisa poder assinar pela empresa. A Apple costuma telefonar para confirmar.
 - A Conta Apple precisa de autenticação de dois fatores.
 - Custa US$ 99 por ano.
 - Espere o e-mail de aprovação antes do passo 0.2.
+- Na loja, o nome do vendedor é o nome legal da empresa, como está no D-U-N-S.
 
 Anote o **Team ID** (10 letras e números). Onde: developer.apple.com/account, Membership details.
 
@@ -36,7 +40,7 @@ Anote o **Team ID** (10 letras e números). Onde: developer.apple.com/account, M
 Onde: App Store Connect, **Business**, aba **Agreements**.
 
 1. Na linha **Paid Apps**, clique **View and Agree to Terms** e aceite. Sem isso não há compra dentro do app.
-2. Ainda em Business, preencha **Tax Forms**. Para pessoa física fora dos EUA, o formulário dos EUA que a Apple pede é o W-8BEN. Confira com o seu contador.
+2. Ainda em Business, preencha **Tax Forms**. Para empresa fora dos EUA, o formulário dos EUA que a Apple pede é o W-8BEN-E. Confira com o seu contador.
 3. Em Business, cadastre a **conta bancária** que recebe.
 
 O Paid Apps só fica ativo com os três prontos.
@@ -62,8 +66,8 @@ Depois, em developer.apple.com/account, **Certificates, Identifiers & Profiles**
 
 | Tipo para escolher | Para quê | Nome que aparece no Mac |
 |---|---|---|
-| **Apple Distribution** | assina o app | `Apple Distribution: Caio Figueiroa (<TEAM_ID>)` |
-| **Mac Installer Distribution** | assina o pacote `.pkg` | `3rd Party Mac Developer Installer: Caio Figueiroa (<TEAM_ID>)` |
+| **Apple Distribution** | assina o app | `Apple Distribution: <NOME DA EMPRESA> (<TEAM_ID>)` |
+| **Mac Installer Distribution** | assina o pacote `.pkg` | `3rd Party Mac Developer Installer: <NOME DA EMPRESA> (<TEAM_ID>)` |
 
 Para cada um: envie o mesmo pedido, baixe o `.cer` e **dê dois cliques** nele. Ele entra no Acesso às Chaves (chaveiro "início de sessão"). Depois pode apagar o `.cer` da pasta Downloads.
 
@@ -695,8 +699,8 @@ Primeiro, só conferir (não envia nada). Troque os campos entre `< >`:
 
 ```
 IPSIO_TEAM=<TEAM_ID> \
-IPSIO_STORE_SIGN='Apple Distribution: Caio Figueiroa (<TEAM_ID>)' \
-IPSIO_INSTALLER_SIGN='3rd Party Mac Developer Installer: Caio Figueiroa (<TEAM_ID>)' \
+IPSIO_STORE_SIGN='Apple Distribution: <NOME DA EMPRESA> (<TEAM_ID>)' \
+IPSIO_INSTALLER_SIGN='3rd Party Mac Developer Installer: <NOME DA EMPRESA> (<TEAM_ID>)' \
 IPSIO_PROFILE=~/Downloads/Ipsio_Mac_App_Store.provisionprofile \
 ASC_KEY_ID=<KEY_ID> ASC_ISSUER=<ISSUER_ID> \
 bash store/release.sh
@@ -706,8 +710,8 @@ Se terminar com `valid.`, envie de verdade (o mesmo comando, com `--upload` no f
 
 ```
 IPSIO_TEAM=<TEAM_ID> \
-IPSIO_STORE_SIGN='Apple Distribution: Caio Figueiroa (<TEAM_ID>)' \
-IPSIO_INSTALLER_SIGN='3rd Party Mac Developer Installer: Caio Figueiroa (<TEAM_ID>)' \
+IPSIO_STORE_SIGN='Apple Distribution: <NOME DA EMPRESA> (<TEAM_ID>)' \
+IPSIO_INSTALLER_SIGN='3rd Party Mac Developer Installer: <NOME DA EMPRESA> (<TEAM_ID>)' \
 IPSIO_PROFILE=~/Downloads/Ipsio_Mac_App_Store.provisionprofile \
 ASC_KEY_ID=<KEY_ID> ASC_ISSUER=<ISSUER_ID> \
 bash store/release.sh --upload
