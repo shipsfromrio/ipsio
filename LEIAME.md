@@ -30,8 +30,10 @@ confere enquanto grava:
 | Começar sem permissão, sem pasta, sem disco | descobre-se no fim | pré-voo que RECUSA com o motivo em palavras |
 | Reunião semanal na agenda | quem lê só o primeiro horário grava uma semana e perde as outras | lê a regra de repetição, as exceções, as remarcadas e as canceladas |
 
-Tamanho: no máximo ~1,8 GB por hora (H.264 por hardware, 12 fps, 4 Mbps). Só
-entram os quadros em que a tela mudou, então um slide parado ocupa bem menos.
+Tamanho, escolhido no menu, **Qualidade** (H.264 por hardware): *Econômica*
+~1,0 GB por hora (8 fps, 2 Mbps), *Normal* ~1,9 GB (12 fps, 4 Mbps, o padrão),
+*Alta* ~3,7 GB (24 fps, 8 Mbps). Isso é o máximo: só entram os quadros em que
+a tela mudou, então um slide parado ocupa bem menos.
 
 ## Instalar
 
@@ -87,7 +89,41 @@ exclamação quando o som (ou o microfone) some por 90 s.
 - **Próximas gravações.** O que a agenda vai gravar. Clicar numa reunião pula
   (ou despula) só ela; pular a que está gravando para na hora. Parar à mão uma
   gravação da agenda também conta como pular.
-- **Título, Pasta, Gravações recentes, Idioma (pt/en).** Arquivos em
+- **Gravar: tela inteira, outra tela, ou uma janela.** A tela principal é o
+  padrão. Outra tela fica valendo para todas as gravações; se for
+  desconectada, o Ipsio grava a tela principal e avisa. Uma janela vale só
+  para a próxima gravação (o ID dela morre com ela); se ela não existir mais
+  na hora de começar, nada é gravado e o Ipsio diz o motivo, nunca a tela
+  inteira no lugar.
+- **Qualidade.** Econômica, Normal ou Alta, com os GB por hora ao lado de
+  cada uma (acima). O mínimo de disco livre e as horas que cabem acompanham.
+- **Lembrar de avisar que está gravando** (ligado por padrão). Uma gravação
+  começada à mão pergunta antes: **Copiar aviso e gravar**, **Gravar** ou
+  **Cancelar**; o aviso vai para a área de transferência, pronto para colar
+  no chat da reunião. Uma gravação da agenda nunca espera clique: começa, e
+  uma notificação lembra; clicar nela copia o aviso. O teste de 10 s nunca
+  pergunta.
+- **Oferecer gravar quando abrir uma reunião** (ligado por padrão). A cada
+  15 s o Ipsio olha os apps abertos e os títulos das janelas (nenhum pixel,
+  nenhum som) atrás de uma chamada aberta: Zoom, Microsoft Teams, Google Meet
+  no navegador, Webex, huddle do Slack. App só aberto não conta. Uma
+  notificação por chamada, com o botão **Gravar**, que grava no modo reunião.
+  Nada é oferecido durante uma gravação, nem com gravação da agenda em curso
+  ou nos próximos 10 minutos. Precisa das notificações permitidas.
+- **Buscar nas gravações…** Palavras ditas, nas transcrições, e palavras no
+  nome dos arquivos, na pasta das gravações. Toda palavra tem que estar na
+  linha; maiúsculas e acentos não importam (`acao` acha `ação`). Clique duplo
+  mostra a gravação no Finder e copia o tempo (`HH:MM:SS`). Só lê.
+- **Atalhos ⌃⌥⌘R (gravar/parar) e ⌃⌥⌘T (testar)**, de qualquer app. Não
+  precisam da permissão de Acessibilidade. O item do menu desliga.
+- **Gravações recentes.** As cinco últimas: mostrar no Finder, transcrever,
+  abrir a transcrição e **Relatório de integridade (PDF)**: ao lado da
+  gravação, `<nome>.integrity.pdf` com tamanho, início, duração, faixas e o
+  SHA-256 calculado agora, comparado com o `.sha256` gravado quando a
+  gravação terminou. Um `.sha256` ausente ou diferente é dito em palavras, e
+  o relatório ensina a conferir com o `shasum`. Nunca escreve por cima da
+  gravação nem do `.sha256` dela.
+- **Título, Pasta, Idioma (pt/en).** Arquivos em
   `~/Movies/Ipsio/AAAA-MM-DD_HH-MM Título.mov`.
 
 A gravação mora dentro do app. Sair, encerrar a sessão e desligar o Mac param e
@@ -145,7 +181,12 @@ Mac e a agenda estiverem no mesmo fuso.
 | `MODE` | `class` | `class` (aula) ou `meeting` (reunião) |
 | `TITLE` | vazio | entra no nome das gravações feitas à mão |
 | `RECORDINGS_DIR` | `~/Movies/Ipsio` | onde ficam os `.mov` |
-| `MIN_FREE_GB` | `20` | abaixo disso, recusa começar |
+| `MIN_FREE_GB` | `20` | abaixo disso, recusa começar (vale para a qualidade Normal; as outras escalam) |
+| `VIDEO_QUALITY` | `normal` | `economy`, `normal` ou `high`; qualquer outra coisa vale `normal` |
+| `CAPTURE_TARGET` | `main` | `main` ou `display:<id>`; janela nunca fica salva aqui |
+| `HOTKEYS` | `1` | `0` desliga os atalhos globais |
+| `DETECT_MEETINGS` | `1` | `0` desliga a oferta de gravar uma chamada aberta |
+| `CONSENT_REMINDER` | `1` | `0` desliga o lembrete de avisar que está gravando |
 | `UI_LANGUAGE` | idioma do sistema | `pt` ou `en` |
 | `CALENDAR_AUTO` | `1` | `0` desliga a gravação automática (a lista continua no menu) |
 | `CALENDAR_BEFORE_MIN` / `CALENDAR_AFTER_MIN` | `2` / `5` | margens de cada reunião |

@@ -34,6 +34,11 @@ app de reunião, com o nome da reunião no arquivo. Reuniões semanais,
 remarcadas e canceladas são lidas do jeito certo. Reuniões seguidas viram dois
 arquivos. Pule uma com um clique.
 
+OFERECE GRAVAR A CHAMADA ABERTA
+Entre numa chamada no Zoom, no Teams, no Google Meet, no Webex ou num huddle
+do Slack, e o Ipsio oferece uma vez gravar: uma notificação com o botão
+Gravar. Ele lê só o título das janelas, nunca o que está na tela.
+
 SOM EM QUE VOCÊ PODE CONFIAR
 As ferramentas de captura do próprio Mac gravam a tela muda. O Ipsio pega o
 som do computador direto do macOS, seja qual for o alto-falante ou fone que
@@ -59,7 +64,14 @@ reunião chegando.
 PROVA DE INTEGRIDADE
 Toda gravação salva ganha ao lado uma impressão digital SHA-256, conferível
 com a ferramenta padrão shasum: prova de que o arquivo não foi alterado
-depois.
+depois. Para qualquer gravação recente, um relatório de integridade em PDF
+põe tudo numa página: a impressão digital calculada de novo, tamanho,
+duração, faixas e como conferir.
+
+ACHE O QUE FOI DITO
+Busque nas suas gravações uma palavra dita em qualquer transcrição, ou no
+nome do arquivo, com ou sem acento. O Ipsio mostra a gravação e o tempo em
+que foi dita.
 
 TUDO FICA NO SEU MAC
 Sem conta, sem servidor, sem nuvem. As gravações vão para Filmes/Ipsio, ou
@@ -77,12 +89,19 @@ o Ipsio para sempre. Sem assinatura.
 E também:
 - Modo aula: só tela e som do computador; funciona sem a permissão de
   microfone.
+- Grave a tela inteira, outra tela, ou uma janela.
+- Qualidade: Econômica, Normal ou Alta, com os GB por hora à vista.
+- Atalhos globais: Control-Option-Command-R grava ou para,
+  Control-Option-Command-T testa.
 - Gravações recentes, título e pasta pelo menu.
 - Português e inglês.
 - Código aberto: o código inteiro é público, sob a GPL.
 
+AVISE QUE ESTÁ GRAVANDO
 O Ipsio grava o que acontece neste Mac. Gravar outras pessoas pode exigir o
-consentimento delas onde você está: avise os participantes antes de gravar.
+consentimento delas onde você está. Antes de uma gravação que você começa, o
+Ipsio oferece um aviso pronto para colar no chat da reunião. Quando a agenda
+começa uma, uma notificação lembra, e um clique copia o aviso.
 
 TRANSCRIÇÃO NO SEU MAC
 Cada gravação vira uma transcrição com quem falou: você pela faixa do
@@ -94,3 +113,7 @@ nunca num servidor.
 Primeira versão na App Store: tela e som do sistema gravados de forma nativa,
 gravação automática pela agenda, faixas separadas para você e para os outros,
 alarme de silêncio ao vivo e impressão digital SHA-256 para cada gravação. Transcrição com quem falou, feita neste Mac.
+E mais: oferta de gravar quando uma chamada abre, lembrete de avisar os
+outros que está gravando, busca no que foi dito, relatório de integridade em
+PDF, gravação de uma tela ou de uma janela, três níveis de qualidade e atalhos
+globais.

@@ -39,6 +39,11 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     let upcomingMenu = NSMenu()
     let modeMenu = NSMenu()
     let permMenu = NSMenu()
+    let targetMenu = NSMenu(), windowMenu = NSMenu(), qualityMenu = NSMenu()
+    let targetItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    let qualityItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    var nextWindow: (id: UInt32, label: String)?   // one-shot: the next manual Record only
+    var windows: [CaptureTarget.Window] = []
     let dir = ProcessInfo.processInfo.environment["IPSIO_DIR"] ?? (NSHomeDirectory() + "/.ipsio")
     lazy var backend: Backend = {
         var h = Host()
@@ -145,6 +150,11 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "search_gone": "A gravação não está mais na pasta.", "search_copied": "Tempo %@ copiado.",
             "report_make": "Relatório de integridade (PDF)", "report_making": "Fazendo o relatório…",
             "report_done": "Relatório de integridade pronto", "report_failed": "O relatório não foi feito",
+            "target": "Gravar: %@", "target_main": "Tela inteira (principal)", "target_display": "Tela %@",
+            "target_window": "Uma janela…", "target_window_next": "%@ (só a próxima gravação)",
+            "target_no_windows": "(nenhuma janela aberta, ou falta a permissão de Gravação de Tela)",
+            "quality": "Qualidade: %@", "quality_name_economy": "Econômica", "quality_name_normal": "Normal", "quality_name_high": "Alta",
+            "quality_economy": "Econômica (~%@ GB/h)", "quality_normal": "Normal (~%@ GB/h)", "quality_high": "Alta (~%@ GB/h)",
             "hotkeys": "Atalhos ⌃⌥⌘R (gravar/parar) e ⌃⌥⌘T (testar)",
             "login": "Abrir ao iniciar a sessão", "login_failed": "O macOS não aceitou o item de login",
             "language": "Switch to English  🇺🇸", "restart": "Reiniciar o app", "quit": "Sair (até o próximo login)",
@@ -238,6 +248,11 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "search_gone": "The recording is no longer in the folder.", "search_copied": "Time %@ copied.",
             "report_make": "Integrity report (PDF)", "report_making": "Making the report…",
             "report_done": "Integrity report ready", "report_failed": "The report was not made",
+            "target": "Record: %@", "target_main": "Whole screen (main)", "target_display": "Screen %@",
+            "target_window": "A window…", "target_window_next": "%@ (next recording only)",
+            "target_no_windows": "(no open window, or the Screen Recording permission is missing)",
+            "quality": "Quality: %@", "quality_name_economy": "Economy", "quality_name_normal": "Normal", "quality_name_high": "High",
+            "quality_economy": "Economy (~%@ GB/h)", "quality_normal": "Normal (~%@ GB/h)", "quality_high": "High (~%@ GB/h)",
             "hotkeys": "Shortcuts ⌃⌥⌘R (record/stop) and ⌃⌥⌘T (test)",
             "login": "Open at login", "login_failed": "macOS refused the login item",
             "language": "Mudar para português  🇧🇷", "restart": "Restart the app", "quit": "Quit (until next login)",
@@ -353,7 +368,11 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         statusItem.isEnabled = false; calendarStatus.isEnabled = false
         menu.addItem(statusItem); menu.addItem(calendarStatus); menu.addItem(.separator())
         menu.addItem(recordItem); menu.addItem(stopItem); menu.addItem(checkItem); menu.addItem(testItem); menu.addItem(.separator())
-        modeMenu.addItem(modeClass); modeMenu.addItem(modeMeeting); modeItem.submenu = modeMenu; menu.addItem(modeItem); menu.addItem(consentItem)
+        modeMenu.addItem(modeClass); modeMenu.addItem(modeMeeting); modeItem.submenu = modeMenu; menu.addItem(modeItem)
+        for m in [targetMenu, windowMenu, qualityMenu] { m.autoenablesItems = false }
+        targetItem.submenu = targetMenu; menu.addItem(targetItem)
+        qualityItem.submenu = qualityMenu; menu.addItem(qualityItem)
+        menu.addItem(consentItem)
         upcomingItem.submenu = upcomingMenu; menu.addItem(upcomingItem)
         recentItem.submenu = recentMenu; menu.addItem(recentItem); menu.addItem(searchItem)
         menu.addItem(openItem); menu.addItem(titleItem); menu.addItem(folderItem)
@@ -476,6 +495,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         stopItem.keyEquivalent = ""
         guard on else { return }
         let k = HotKeys { a in
+            guard NSApp.modalWindow == nil else { return }   // not under a popup (it would stack another)
             switch a {
             case .record: if self.stopItem.isEnabled { self.doStop() } else if self.recordItem.isEnabled { self.doRecord() }
             case .test: if self.testItem.isEnabled { self.doTest() }
@@ -530,7 +550,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             NSPasteboard.general.clearContents(); NSPasteboard.general.setString(n, forType: .string)
         } else if r.actionIdentifier == "ipsio.record" {
             // A call: record it with the microphone, like a calendar meeting.
-            DispatchQueue.main.async { if !self.recording() && !self.busy { self.startRecording(mode: "meeting") } }
+            DispatchQueue.main.async { if !self.recording() && !self.busy { self.startRecording(mode: "meeting", useWindow: false) } }
         } else if let p = r.notification.request.content.userInfo["file"] as? String, FileManager.default.fileExists(atPath: p) {
             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
         }
@@ -556,6 +576,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         let mic = run("microphone").trimmingCharacters(in: .whitespacesAndNewlines)
         modeClass.title = t("mode_class")
         modeMeeting.title = mic.isEmpty ? t("mode_meeting") : t("mode_meeting_mic", mic)
+        buildTarget(); buildQuality(); loadWindows()
     }
     func buildRecent() {
         recentMenu.removeAllItems()
@@ -582,7 +603,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             tr.target = self; tr.representedObject = u; tr.isEnabled = !busyHere && !recording()
             sub.addItem(tr)
             let rep = NSMenuItem(title: reporting.contains(u.path) ? t("report_making") : t("report_make"), action: #selector(doReport(_:)), keyEquivalent: "")
-            rep.target = self; rep.representedObject = u; rep.isEnabled = !reporting.contains(u.path)
+            rep.target = self; rep.representedObject = u; rep.isEnabled = !reporting.contains(u.path) && !recording()
             sub.addItem(rep)
             if done {
                 let open = NSMenuItem(title: t("open_transcript"), action: #selector(doOpenTranscript(_:)), keyEquivalent: "")
@@ -785,7 +806,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         }
         if busy { return }
         if diedByItself() {
-            let log = logTail()
+            let log = logTail(), window = lastStartWindow
             busy = true                                            // a single alert: stop clears the signal
             DispatchQueue.global().async {
                 _ = self.run("stop")                               // closes the file, writes the .sha256
@@ -805,9 +826,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
                         let a = NSAlert()
                         a.messageText = self.t("died_title")
                         a.informativeText = self.t("died_body", log)
-                        a.addButton(withTitle: self.t("record_again")); a.addButton(withTitle: self.t("ok"))
+                        if !window { a.addButton(withTitle: self.t("record_again")) }
+                        a.addButton(withTitle: self.t("ok"))
                         return a
-                    }) { if $0 == .alertFirstButtonReturn { self.startRecording(mode: self.mode, askConsent: false) } }
+                    }) { if !window && $0 == .alertFirstButtonReturn { self.startRecording(mode: self.mode, askConsent: false, useWindow: false) } }
                 }
             }
             return
@@ -1036,36 +1058,59 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
 
     // ---- actions ----
     @objc func doRecord() { startRecording(mode: mode) }
-    func startRecording(mode m: String, askConsent: Bool = true) {
+    /// useWindow: the one-shot window applies to a click or the hot key, not to
+    /// a call offered by notification (that is a meeting, recorded whole).
+    func startRecording(mode m: String, askConsent: Bool = true, useWindow: Bool = true) {
+        guard !recording(), !busy else { refresh(); return }
         guard licenseAllows(explain: true) else { refresh(); return }
+        // The microphone not asked yet: ask, and start when allowed (before,
+        // the "Allow" click was the end of it and the call went unrecorded).
+        if m == "meeting" && CGPreflightScreenCaptureAccess() && AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+            AVCaptureDevice.requestAccess(for: .audio) { ok in
+                DispatchQueue.main.async {
+                    self.refresh()
+                    if ok { self.startRecording(mode: m, askConsent: askConsent, useWindow: useWindow) }
+                }
+            }
+            return
+        }
         guard permissionsOk(explain: true, meeting: m == "meeting") else { refresh(); return }
         // A click records only after the consent reminder (app/Consent.swift).
+        // Through modal(): a modal run inside a main-queue block would hold every
+        // other main.async (a calendar start, its stop) until the click.
         if askConsent, Consent.shouldRemind(enabled: Consent.enabled(readConf()), mode: m, trigger: .manual, eventID: nil, alreadyReminded: consentReminded) == .dialog {
-            NSApp.activate(ignoringOtherApps: true)
             let notice = Consent.text(lang: lang, mode: m)
-            let a = NSAlert()
-            a.messageText = Consent.t("dialog_title", lang: lang)
-            a.informativeText = Consent.t("dialog_body", notice, lang: lang)
-            for b in Consent.buttons(lang: lang) { a.addButton(withTitle: b) }
-            let r = a.runModal()
-            switch Consent.choice(button: r.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue) {
-            case .copyAndRecord: NSPasteboard.general.clearContents(); NSPasteboard.general.setString(notice, forType: .string)
-            case .record: break
-            case .cancel: refresh(); return
+            modal({
+                let a = NSAlert()
+                a.messageText = Consent.t("dialog_title", lang: self.lang)
+                a.informativeText = Consent.t("dialog_body", notice, lang: self.lang)
+                for b in Consent.buttons(lang: self.lang) { a.addButton(withTitle: b) }
+                return a
+            }) { r in
+                switch Consent.choice(button: r.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue) {
+                case .copyAndRecord: NSPasteboard.general.clearContents(); NSPasteboard.general.setString(notice, forType: .string)
+                case .record: break
+                case .cancel: self.refresh(); return
+                }
+                // The popup took time: the guard at the top sees a calendar start or the hot key that won meanwhile.
+                self.startRecording(mode: m, askConsent: false, useWindow: useWindow)
             }
-            // The popup took time: a calendar start or the hot key may have won meanwhile.
-            guard !recording(), !busy else { refresh(); return }
+            return
         }
         alarmGiven = false; micAlarmGiven = false
+        var env = ["IPSIO_MODE": m]
+        if useWindow, let w = nextWindow { env["IPSIO_TARGET"] = CaptureTarget.window(w.id).oneShot; nextWindow = nil }
+        lastStartWindow = env["IPSIO_TARGET"] != nil
         busy = true; refresh()
         DispatchQueue.global().async {
-            let r = self.run("start", env: ["IPSIO_MODE": m])
+            let r = self.run("start", env: env)
             DispatchQueue.main.async {
                 self.busy = false; self.refresh()
                 let s = self.parse(r)
-                if self.recording() {
+                // Only a start that says RECORDING is ours (as in startCalendar).
+                if s.state["verdict"] == "RECORDING" && self.recording() {
                     // A warning (battery, dead microphone) asks for a decision: popup. No warning: notification.
-                    if s.state["battery"] == "1" || s.state["microphone"] == "DEAD" { self.alert(s.title, s.body) }
+                    if s.state["battery"] == "1" || s.state["microphone"] == "DEAD" || s.state["target"] == "main_fallback" { self.alert(s.title, s.body) }
                     else { self.notify(self.t("notif_recording"), s.body.components(separatedBy: "\n").first ?? "") }
                 } else {
                     self.alert(s.title.isEmpty ? self.t("did_not_start") : s.title, s.body)
@@ -1073,6 +1118,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             }
         }
     }
+    /// The last manual start recorded one window: if it dies (the window
+    /// closed), "Record again" would record the whole screen instead.
+    var lastStartWindow = false
     @objc func doStop() {
         let file = currentFile()
         // Stopping a calendar recording by hand = skipping that meeting
@@ -1402,5 +1450,89 @@ struct IpsioMain {
         app.delegate = delegate
         app.setActivationPolicy(.accessory)
         app.run()
+    }
+}
+
+// ---- what to record (app/Engine/Target.swift) and video quality (app/Engine/Quality.swift) ----
+extension App {
+    var captureTarget: CaptureTarget { CaptureTarget.parse(conf: readConf()["CAPTURE_TARGET"]) }
+    var quality: Quality { Quality.parse(readConf()["VIDEO_QUALITY"]) }
+    func displays() -> [(id: UInt32, label: String)] {
+        var ids = [CGDirectDisplayID](repeating: 0, count: 16), n: UInt32 = 0
+        guard CGGetActiveDisplayList(16, &ids, &n) == .success else { return [] }
+        let main = CGMainDisplayID()
+        let sorted = ids.prefix(Int(n)).sorted { ($0 == main ? 0 : 1, $0) < ($1 == main ? 0 : 1, $1) }
+        return sorted.enumerated().map { i, id in let b = CGDisplayBounds(id); return (id, "\(i + 1) (\(Int(b.width))x\(Int(b.height)))") }
+    }
+    func loadWindows() {
+        guard CGPreflightScreenCaptureAccess() else { windows = []; buildWindows(); return }
+        let own = Bundle.main.bundleIdentifier ?? ""
+        SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: true) { content, _ in
+            let ws = (content?.windows ?? []).map {
+                CaptureTarget.Window(id: $0.windowID, app: $0.owningApplication?.applicationName ?? "",
+                                     bundle: $0.owningApplication?.bundleIdentifier ?? "", title: $0.title ?? "", layer: $0.windowLayer)
+            }
+            let list = CaptureTarget.pickable(ws, ownBundle: own)
+            DispatchQueue.main.async { self.windows = list; self.buildWindows() }
+        }
+    }
+    func buildTarget() {
+        targetMenu.removeAllItems()
+        let on = recording() || busy
+        let cur = captureTarget, ds = displays()
+        let main = NSMenuItem(title: t("target_main"), action: #selector(doTargetMain), keyEquivalent: "")
+        main.target = self; main.isEnabled = !on
+        main.state = nextWindow == nil && (cur == .main || !ds.dropFirst().contains { CaptureTarget.display($0.id) == cur }) ? .on : .off
+        targetMenu.addItem(main)
+        for d in ds.dropFirst() {
+            let mi = NSMenuItem(title: t("target_display", d.label), action: #selector(doTargetDisplay(_:)), keyEquivalent: "")
+            mi.target = self; mi.tag = Int(d.id); mi.isEnabled = !on
+            mi.state = nextWindow == nil && cur == .display(d.id) ? .on : .off
+            targetMenu.addItem(mi)
+        }
+        let w = NSMenuItem(title: t("target_window"), action: nil, keyEquivalent: "")
+        w.submenu = windowMenu; w.isEnabled = !on; w.state = nextWindow != nil ? .on : .off
+        targetMenu.addItem(w)
+        buildWindows()
+        let label: String
+        if let nw = nextWindow { label = t("target_window_next", nw.label) }
+        else if case .display(let id) = cur, let d = ds.dropFirst().first(where: { $0.id == id }) { label = t("target_display", d.label) }
+        else { label = t("target_main") }
+        targetItem.title = t("target", label)
+    }
+    func buildWindows() {
+        windowMenu.removeAllItems()
+        if windows.isEmpty {
+            let none = NSMenuItem(title: t("target_no_windows"), action: nil, keyEquivalent: ""); none.isEnabled = false
+            windowMenu.addItem(none); return
+        }
+        for win in windows {
+            let mi = NSMenuItem(title: win.label, action: #selector(doTargetWindow(_:)), keyEquivalent: "")
+            mi.target = self; mi.tag = Int(win.id); mi.isEnabled = !(recording() || busy)
+            mi.state = nextWindow?.id == win.id ? .on : .off
+            windowMenu.addItem(mi)
+        }
+    }
+    func buildQuality() {
+        qualityMenu.removeAllItems()
+        let meeting = mode == "meeting", cur = quality
+        for q in Quality.allCases {
+            var gb = q.perHourLabel(meeting: meeting)
+            if lang == "pt" { gb = gb.replacingOccurrences(of: ".", with: ",") }
+            let mi = NSMenuItem(title: t("quality_" + q.rawValue, gb), action: #selector(doQuality(_:)), keyEquivalent: "")
+            mi.target = self; mi.representedObject = q.rawValue; mi.state = q == cur ? .on : .off
+            mi.isEnabled = !(recording() || busy)
+            qualityMenu.addItem(mi)
+        }
+        qualityItem.title = t("quality", t("quality_name_" + cur.rawValue))
+    }
+    @objc func doTargetMain() { nextWindow = nil; var c = readConf(); c["CAPTURE_TARGET"] = CaptureTarget.main.conf; writeConf(c); refresh() }
+    @objc func doTargetDisplay(_ m: NSMenuItem) {
+        nextWindow = nil; var c = readConf(); c["CAPTURE_TARGET"] = CaptureTarget.display(UInt32(m.tag)).conf; writeConf(c); refresh()
+    }
+    @objc func doTargetWindow(_ m: NSMenuItem) { nextWindow = (UInt32(m.tag), m.title); refresh() }   // never written to the conf
+    @objc func doQuality(_ m: NSMenuItem) {
+        guard let raw = m.representedObject as? String else { return }
+        var c = readConf(); c["VIDEO_QUALITY"] = Quality.parse(raw).rawValue; writeConf(c); refresh()
     }
 }

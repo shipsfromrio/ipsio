@@ -34,6 +34,11 @@ the meeting's name in the file. Weekly meetings, moved and cancelled
 occurrences are read correctly. Back-to-back meetings become two files.
 Skip one with a click.
 
+OFFERS TO RECORD AN OPEN CALL
+Join a call in Zoom, Teams, Google Meet, Webex or a Slack huddle, and Ipsio
+offers once to record it: one notification with a Record button. It reads
+only window titles, never what is on the screen.
+
 SOUND YOU CAN TRUST
 The Mac's own screenshot tools record a silent screen. Ipsio takes the
 computer's sound straight from macOS, whatever speaker or headset you use.
@@ -59,6 +64,12 @@ coming.
 EVIDENCE OF INTEGRITY
 Every saved recording gets a SHA-256 fingerprint next to it, checkable with
 the standard shasum tool: proof that the file was not changed afterwards.
+For any recent recording, a PDF integrity report puts it on one page: the
+fingerprint computed again, size, length and tracks, and how to check it.
+
+FIND WHAT WAS SAID
+Search your recordings for a word said in any transcript, or in a file name,
+with or without accents. Ipsio shows the recording and the time it was said.
 
 EVERYTHING STAYS ON YOUR MAC
 No account, no server, no cloud. Recordings go to Movies/Ipsio, or a folder
@@ -76,12 +87,19 @@ Ipsio for life. No subscription.
 Also:
 - Class mode: screen and computer sound only; it works without the
   microphone permission.
+- Record the whole screen, another screen, or one window.
+- Quality: Economy, Normal or High, with the GB per hour shown.
+- Global shortcuts: Control-Option-Command-R records or stops,
+  Control-Option-Command-T tests.
 - Recent recordings, title and folder from the menu.
 - English and Portuguese.
 - Open source: the full code is public under the GPL.
 
+TELL THEM YOU ARE RECORDING
 Ipsio records what happens on this Mac. Recording other people may require
-their consent where you live: tell the participants before you record.
+their consent where you live. Before a recording you start, Ipsio offers a
+notice ready to paste in the meeting chat. When the calendar starts one, a
+notification reminds you, and a click copies the notice.
 
 TRANSCRIPTION ON YOUR MAC
 Each recording becomes a transcript with who spoke: you from the microphone
@@ -93,3 +111,6 @@ never on a server.
 First release on the App Store: screen and system sound recorded natively,
 automatic recording from your calendar, separate tracks for you and the
 others, a live silence alarm and a SHA-256 fingerprint for every recording. Transcripts with who spoke, made on this Mac.
+Also: an offer to record when a call opens, a reminder to tell the others you
+are recording, search in what was said, a PDF integrity report, recording one
+screen or one window, three quality levels and global shortcuts.

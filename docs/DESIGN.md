@@ -158,3 +158,76 @@ from Terminal. On the Mac: doctor complete; a 12 s meeting said NO_SOUND with
 the microphone live at -35 dB, saved SILENT 100% with `shasum -c` OK; `test`
 caught the spoken sentence at -25.5 dB and left nothing behind; the app
 launched and its setup window read the native doctor as complete.
+
+## 4. Six features for 1.0 (06/10/2026, branch `engine-app`)
+
+Each rule below lives in a pure file with its own bench in `tests/`; the app
+only shows what it answers.
+
+### Consent reminder (`app/Consent.swift`)
+
+A reminder never blocks a recording that nobody is there to unblock. A
+recording started by hand asks first (copy the notice and record, record,
+cancel): someone just clicked, so someone can answer. A calendar recording
+starts on its own, often with nobody at the Mac, so it only gets a
+notification, and a click on it copies the notice. A popup there would hold
+the start of a meeting hostage to a click. A calendar event is reminded once
+per run, even if its recording restarts. The 10 s test never asks: it records
+only the Mac's own sentence and deletes it. After the popup, the start checks
+again that nothing began meanwhile (the calendar or the shortcut may have won
+the race). Off with `CONSENT_REMINDER='0'`.
+
+### Open call detection (`app/MeetingDetect.swift`)
+
+Only running apps and window titles, every 15 s: no pixels, no audio. An app
+that is merely open is never a meeting (Zoom on its home window, Teams on a
+chat, the Meet landing page); only a window that is the call counts. Words
+are matched whole, without case or accents, so a channel named
+`huddle-notes` or a tab called "meetings" is not a call. Each call has a
+stable key (`zoom`, `teams`, `meet:<code>`...), and `Debounce` offers it
+once. A key is forgotten after 120 s unseen, so the next call in the same app
+is offered again. A call seen while recording, or with a calendar recording
+on or due within 10 minutes, counts as handled and is never offered later in
+that call: the calendar already records it. Minimized windows count too
+(otherwise a call would be forgotten and offered again). The offer needs its
+Record button, so it is a notification or nothing, never a popup.
+
+### What to record (`app/Engine/Target.swift`)
+
+A display is kept in the conf (`CAPTURE_TARGET=display:<id>`); a window never
+is, because its ID dies with the window, so it goes only to the next start
+(`IPSIO_TARGET=window:<id>`) and is cleared whatever the outcome. The two
+fail in opposite directions on purpose. A display that is gone falls back to
+the main screen, with a warning: the user wanted the screen recorded. A window
+that is gone fails closed: nothing is recorded and the reason is said, never
+the whole screen in its place, which could show what the user meant to keep
+out. A window ID that does not parse stays a window (ID 0, which never
+exists), so it fails too.
+
+### Quality (`app/Engine/Quality.swift`)
+
+Normal is what the engine always recorded (12 fps, 4 Mbps); a missing or
+unknown value reads as normal. `MIN_FREE_GB` and the hours left were set for
+normal, so they scale with the preset's size per hour, the minimum rounded up
+(fail closed).
+
+### Integrity report (`app/Report.swift`)
+
+The report never invents a seal. The SHA-256 in it is computed from the file
+when the report is made, and the `.sha256` written when the recording ended
+is compared with it. Equal, different, missing, malformed or naming another
+file: each is said in words, and a missing one says that the hash is from
+now, not from the end of the recording. It writes only
+`<name>.integrity.pdf`, through a temporary file and a rename; it refuses
+anything that is not a `.mov` or `.mkv`, and an output that would be the
+recording or its `.sha256`. The start time comes from the file name (to the
+minute) unless the creation date falls inside that minute, since a copy
+resets the creation date.
+
+### Search and shortcuts
+
+Search (`app/Search.swift`) only reads: transcripts and file names in the
+recordings folder, every word required, case and accents ignored; a file that
+cannot be read is skipped. The shortcuts (`app/HotKey.swift`) use Carbon's
+`RegisterEventHotKey`, which works in the sandbox and needs no Accessibility
+permission; three modifiers (⌃⌥⌘) so no common shortcut is taken over.

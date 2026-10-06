@@ -40,6 +40,7 @@ final class FakeCapture: Capture {
     var stoppedByItself: Error?
     var starts = 0, stops = 0
     var lastOptions: Recorder.Options?
+    var resolvedTarget: CaptureTarget.Resolved?
     var recording: Bool { snap != nil }
     func startAndWait(_ o: Recorder.Options, timeout: Double) -> Result<String, Recorder.Failure> {
         starts += 1; lastOptions = o
@@ -387,6 +388,85 @@ struct BackendTests {
             let (b, _, _) = fixture(conf: ["MIN_FREE_GB": "50"]); b.host.freeGB = { _ in 10 }
             let out = b.run("doctor")
             check(Setup.parseState(out)["missing"] == "disk" && out.contains("X   Only 10 GB free"), "doctor: a full disk, with the reason", out)
+        }
+
+        // ---- quality and target ----
+        do {
+            let (b, cap, _) = fixture()
+            let o = parse(b.run("start"))
+            check(cap.lastOptions?.fps == 12 && cap.lastOptions?.videoBitrate == 4_000_000 && cap.lastOptions?.target == .main,
+                  "no VIDEO_QUALITY, no CAPTURE_TARGET: 12 fps, 4 Mb/s, main screen, as always")
+            check(o.state["quality"] == "normal" && o.state["target"] == "main" && o.state["file"]?.hasSuffix(".mov") == true,
+                  "start: quality= and target= before file=", "\(o.state)")
+        }
+        do {
+            let (b, cap, _) = fixture(conf: ["VIDEO_QUALITY": "high"])
+            let o = parse(b.run("start"))
+            check(cap.lastOptions?.fps == 24 && cap.lastOptions?.videoBitrate == 8_000_000 && o.state["quality"] == "high", "VIDEO_QUALITY=high reaches the capture")
+            let f = cap.snap!.file
+            cap.snap = Recorder.Snapshot(level: Level(verdict: "OK", silence: 0, micSilence: nil), system: [-22], mic: nil, seconds: 65, meterAge: 1, file: f)
+            let l = parse(b.run("level"))
+            check(l.state["disk_h"] == String(Quality.high.hoursLeft(freeGB: 500, meeting: false)) && (Int(l.state["disk_h"] ?? "") ?? 999) < 277,
+                  "level: the hours left follow the preset", "\(l.state)")
+        }
+        do {
+            let (b, cap, _) = fixture(conf: ["VIDEO_QUALITY": "ultra"])
+            _ = b.run("start")
+            check(cap.lastOptions?.fps == 12 && cap.lastOptions?.videoBitrate == 4_000_000, "an unknown VIDEO_QUALITY records normal")
+        }
+        do {
+            let (b, cap, _) = fixture(conf: ["VIDEO_QUALITY": "high"]); b.host.freeGB = { _ in 30 }
+            let o = parse(b.run("start"))
+            check(o.state["verdict"] == "DISK_FULL" && cap.starts == 0 && o.body.contains("40 GB") && o.body.contains("about 4 GB per hour"),
+                  "high: the default minimum doubles (40 GB), the text says 4 GB per hour", o.body)
+            let d = b.run("doctor")
+            check(Setup.parseState(d)["missing"] == "disk", "doctor: the same scaled minimum", d)
+        }
+        do {
+            let (b, _, _) = fixture(conf: ["VIDEO_QUALITY": "economy"]); b.host.freeGB = { _ in 12 }
+            check(parse(b.run("start")).state["verdict"] == "RECORDING", "economy: 12 GB is enough (minimum 11)")
+        }
+        do {
+            let (b, _, _) = fixture(); b.host.freeGB = { _ in 19 }
+            let o = parse(b.run("start"))
+            check(o.state["verdict"] == "DISK_FULL" && o.body.contains("20 GB") && o.body.contains("about 2 GB per hour"), "normal: minimum 20, 2 GB per hour, as before", o.body)
+        }
+        do {
+            let (b, cap, _) = fixture(conf: ["CAPTURE_TARGET": "display:5"])
+            let o = parse(b.run("start"))
+            check(cap.lastOptions?.target == .display(5) && o.state["target"] == "display", "CAPTURE_TARGET=display:5 reaches the capture", "\(o.state)")
+        }
+        do {
+            let (b, cap, _) = fixture(conf: ["CAPTURE_TARGET": "display:5"])
+            _ = b.run("start", env: ["IPSIO_TARGET": "window:7"])
+            check(cap.lastOptions?.target == .window(7), "IPSIO_TARGET=window:7 overrides the conf for one start")
+            _ = b.run("stop"); _ = b.run("start")
+            check(cap.lastOptions?.target == .display(5), "the next start without it: the conf's display again")
+        }
+        do {
+            let (b, cap, _) = fixture(conf: ["CAPTURE_TARGET": "window:7"])
+            _ = b.run("start")
+            check(cap.lastOptions?.target == .main, "a window in the conf is not honored: main")
+        }
+        do {
+            let (b, cap, _) = fixture(); cap.startResult = .failure(.windowGone)
+            let o = parse(b.run("start", env: ["IPSIO_TARGET": "window:7"]))
+            check(o.state["verdict"] == "WINDOW_GONE" && o.title == "THE WINDOW IS GONE" && b.currentFile == nil && !b.recording,
+                  "the chosen window is gone: WINDOW_GONE, nothing recorded", "\(o.state)")
+        }
+        do {
+            let (b, cap, _) = fixture(conf: ["CAPTURE_TARGET": "display:9"]); cap.resolvedTarget = .display(1, fellBack: true)
+            let o = parse(b.run("start"))
+            check(o.state["verdict"] == "RECORDING" && o.state["target"] == "main_fallback" && o.body.contains("not connected"),
+                  "a display gone: records main, says so", o.body)
+        }
+        do {
+            let (b, cap, _) = fixture()
+            _ = b.run("start", env: ["IPSIO_TARGET": "window:7"])
+            cap.stoppedByItself = Recorder.Failure.windowClosed("gone")
+            check(b.diedByItself && (b.whyItDied ?? "").contains("window was closed"), "the recorded window closes: the watchdog's signal, with the reason")
+            let o = parse(b.run("stop"))
+            check(o.state["verdict"] == "SAVED", "and stop saves it like any system stop", "\(o.state)")
         }
 
         // ---- the small commands ----

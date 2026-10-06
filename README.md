@@ -31,8 +31,10 @@ and checks while it records:
 | Starting with no permission, folder or disk | found out at the end | a preflight that REFUSES, with the reason in words |
 | A weekly meeting in the calendar | reading only the first slot records one week and misses the rest | reads the repeat rule, exceptions, moved and cancelled occurrences |
 
-Size: at most ~1.8 GB per hour (hardware H.264, 12 fps, 4 Mbps). Only frames
-where the screen changed are written, so a still slide takes far less.
+Size, set in the menu, **Quality** (hardware H.264): *Economy* ~1.0 GB per
+hour (8 fps, 2 Mbps), *Normal* ~1.9 GB (12 fps, 4 Mbps, the default), *High*
+~3.7 GB (24 fps, 8 Mbps). These are the most it takes: only frames where the
+screen changed are written, so a still slide takes far less.
 
 ## Install
 
@@ -87,7 +89,41 @@ with an exclamation mark when the sound (or the microphone) is gone for 90 s.
 - **Upcoming recordings.** What the calendar will record. Clicking a meeting
   skips (or un-skips) just that one; skipping the one being recorded stops it
   right away. Stopping a calendar recording by hand also counts as skipping.
-- **Title, Folder, Recent recordings, Language (pt/en).** Files go to
+- **Record: whole screen, another screen, or one window.** The main screen is
+  the default. Another screen is kept for every recording; if it is
+  unplugged, Ipsio records the main screen and says so. A window counts for
+  the next recording only (its ID dies with the window); if it is gone at the
+  start, nothing is recorded and Ipsio says why, never the whole screen in
+  its place.
+- **Quality.** Economy, Normal or High, with the GB per hour next to each
+  (above). The minimum free space and the hours left scale with it.
+- **Remind me to announce the recording** (on by default). A recording
+  started by hand first asks: **Copy notice and record**, **Record** or
+  **Cancel**; the notice goes to the clipboard, ready to paste in the meeting
+  chat. A calendar recording never waits for a click: it starts, and a
+  notification reminds you; clicking it copies the notice. The 10 s test
+  never asks.
+- **Offer to record when a meeting opens** (on by default). Every 15 s Ipsio
+  looks at the running apps and the window titles (no pixels, no sound) for
+  an open call: Zoom, Microsoft Teams, Google Meet in a browser, Webex, a
+  Slack huddle. An app merely open does not count. One notification per call,
+  with a **Record** button that records in meeting mode. No offer while
+  recording, or with a calendar recording on or due within 10 minutes. Needs
+  notifications allowed.
+- **Search recordings…** Words said, in the transcripts, and words in the
+  file names, in the recordings folder. Every word must be in the line; case
+  and accents are ignored (`acao` finds `ação`). A double-click shows the
+  recording in Finder and copies the time (`HH:MM:SS`). It only reads.
+- **Shortcuts ⌃⌥⌘R (record/stop) and ⌃⌥⌘T (test)**, from any app. They need
+  no Accessibility permission. The menu item turns them off.
+- **Recent recordings.** The last five: show in Finder, transcribe, open the
+  transcript, and **Integrity report (PDF)**: next to the recording,
+  `<name>.integrity.pdf` with size, start, length, tracks and the SHA-256
+  computed now, compared with the `.sha256` written when the recording ended.
+  A missing or different `.sha256` is said in words, and the report says how
+  to check it with `shasum`. It never writes over the recording or its
+  `.sha256`.
+- **Title, Folder, Language (pt/en).** Files go to
   `~/Movies/Ipsio/YYYY-MM-DD_HH-MM Title.mov`.
 
 The recording lives inside the app. Quit, logout and shutdown stop and save
@@ -146,7 +182,12 @@ menu. It is right as long as the Mac and the calendar share a time zone.
 | `MODE` | `class` | `class` or `meeting` |
 | `TITLE` | empty | goes into the name of manual recordings |
 | `RECORDINGS_DIR` | `~/Movies/Ipsio` | where the `.mov` files go |
-| `MIN_FREE_GB` | `20` | below this, it refuses to start |
+| `MIN_FREE_GB` | `20` | below this, it refuses to start (set for Normal quality; scaled for the others) |
+| `VIDEO_QUALITY` | `normal` | `economy`, `normal` or `high`; anything else reads as `normal` |
+| `CAPTURE_TARGET` | `main` | `main` or `display:<id>`; a window is never saved here |
+| `HOTKEYS` | `1` | `0` turns the global shortcuts off |
+| `DETECT_MEETINGS` | `1` | `0` turns off the offer to record an open call |
+| `CONSENT_REMINDER` | `1` | `0` turns off the reminder to announce the recording |
 | `UI_LANGUAGE` | system language | `pt` or `en` |
 | `CALENDAR_AUTO` | `1` | `0` turns automatic recording off (the list stays in the menu) |
 | `CALENDAR_BEFORE_MIN` / `CALENDAR_AFTER_MIN` | `2` / `5` | margins around each meeting |
