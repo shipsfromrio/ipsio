@@ -128,6 +128,7 @@ struct HelperState {
     static let summaryMax = 2000            // older content, compacted
     static let dedupSeconds = 600.0         // a tip is not repeated within 10 minutes
     static let promptMax = 6000             // characters of recent transcript (the local model has a small window)
+    static let voiceDB = -50.0              // the computer sound at or above this: the others are talking
 
     var lang: String
     private(set) var window: [HeardLine] = []
@@ -138,6 +139,7 @@ struct HelperState {
     private(set) var partial: [Speaker: (text: String, at: Double)] = [:]
     private(set) var othersWords = 0                    // since the last request
     private(set) var othersLastHeard: Double?
+    private(set) var voiceSeen = false                  // the others' sound is measured: it, not the text, says when they pause
     private(set) var asked = 0, failed = 0
 
     init(lang: String) { self.lang = lang == "en" ? "en" : "pt" }
@@ -149,16 +151,26 @@ struct HelperState {
             partial[who] = nil
             guard !clean.isEmpty else { return }
             let line = HeardLine(t: now, speaker: who, text: clean)
-            if Echo.isEcho(line, recentOthers: Array(window.suffix(20)) + (partial[.others].map { [HeardLine(t: $0.at, speaker: .others, text: $0.text)] } ?? [])) { return }
+            if Echo.isEcho(line, recentOthers: othersHeard) { return }
+            // The microphone's copy can be final first (seen live): it goes when the others' line arrives.
+            if who == .others { window.removeAll { $0.speaker == .me && Echo.isEcho($0, recentOthers: [line]) } }
             window.append(line)
-            if who == .others { othersWords += HelperText.words(clean); othersLastHeard = now }
+            // A final line can come seconds after the voice stopped: with the sound measured, it does not hold the request.
+            if who == .others { othersWords += HelperText.words(clean); if !voiceSeen { othersLastHeard = now } }
         } else {
-            if partial[who]?.text != clean { partial[who] = (clean, now); if who == .others && !clean.isEmpty { othersLastHeard = now } }
+            if partial[who]?.text != clean { partial[who] = (clean, now); if who == .others && !clean.isEmpty && !voiceSeen { othersLastHeard = now } }
         }
         compact(now: now)
     }
 
-    /// Lines older than the window leave it for the running summary (the
+    /// Lines older than the window leave it for the running summary (the    /// The level of a track (dBFS, a fraction of a second of it). The others'
+    /// sound marks them as still talking: the recognizer can sit on a line for
+    /// seconds, and a request in the middle of their turn answers half of it.
+    mutating func sound(_ who: Speaker, dB: Double, at now: Double) {
+        if who == .others && dB >= HelperState.voiceDB { othersLastHeard = now; voiceSeen = true }
+    }
+
+
     /// tail kept when it grows past its limit).
     mutating func compact(now: Double) {
         var old: [HeardLine] = []
@@ -169,6 +181,11 @@ struct HelperState {
         if summary.count > HelperState.summaryMax { summary = String(summary.suffix(HelperState.summaryMax)) }
     }
 
+    /// What the others said lately, their line in progress included: what an echo is judged against.
+    var othersHeard: [HeardLine] {
+        Array(window.suffix(20)) + (partial[.others].map { [HeardLine(t: $0.at, speaker: .others, text: $0.text)] } ?? [])
+    }
+
     /// Words heard on Others since the last request, the line in progress included.
     var othersPending: Int { othersWords + HelperText.words(partial[.others]?.text ?? "") }
 
@@ -177,10 +194,13 @@ struct HelperState {
     }
 
     /// Starts a request: marks it in flight and builds what the brain reads.
-    mutating func beginAsk(now: Double, research: Bool) -> HelperRequest {
+    /// `small`: the on-device model, which copies a list of tips back word for
+    /// word (measured), so it does not get the tips already given; the dedup drops its repeats.
+    mutating func beginAsk(now: Double, research: Bool, small: Bool = false) -> HelperRequest {
+        let since = cadence.lastAsk ?? -Double.infinity
         cadence.begin(now: now); othersWords = 0; asked += 1
         return HelperRequest(system: HelperPrompt.system(lang: lang, research: research),
-                             prompt: HelperPrompt.user(self, now: now, lang: lang), lang: lang, research: research)
+                             prompt: HelperPrompt.user(self, now: now, lang: lang, since: since, listGiven: !small), lang: lang, research: research)
     }
 
     /// The brain answered (or failed): the ledger grows, the new tips that are
@@ -224,16 +244,39 @@ struct HelperState {
     }
 
     /// Dedup: a tip whose normalized text matches one shown in the last 10 minutes is dropped.
+    /// A reworded repeat counts too (the on-device model rewrites the end of
+    /// a tip it gave before): see `same`.
     func accept(_ tip: HelperTip, now: Double) -> Bool {
         let n = HelperText.norm(tip.text)
         guard !n.isEmpty else { return false }
-        return !tips.contains { now - $0.t < HelperState.dedupSeconds && HelperText.norm($0.text) == n }
+        return !tips.contains { now - $0.t < HelperState.dedupSeconds && HelperState.same($0.text, tip.text) }
+    }
+
+    static let sameWords = 0.7
+    /// Two tips say the same when at least 70% of the words of the longer one
+    /// are in both (case, accents and punctuation aside).
+    static func same(_ a: String, _ b: String) -> Bool {
+        let x = Set(HelperText.norm(a).split(separator: " ")), y = Set(HelperText.norm(b).split(separator: " "))
+        guard !x.isEmpty, !y.isEmpty else { return x == y }
+        return Double(x.intersection(y).count) / Double(max(x.count, y.count)) >= sameWords
+    }
+
+    /// What the others said after `since` (the last request), their line in
+    /// progress included, newest kept within `limit`: the turn a tip answers.
+    func othersTurn(since: Double, limit: Int = 1500) -> String {
+        var lines = window.filter { $0.speaker == .others && $0.t > since }.map { $0.text }
+        if let p = partial[.others], !p.text.isEmpty { lines.append(p.text) }
+        var out: [String] = [], size = 0
+        for l in lines.reversed() { if size + l.count > limit { break }; out.append(l); size += l.count + 1 }
+        return out.reversed().joined(separator: "\n")
     }
 
     /// The recent transcript as the brain reads it, newest kept when too long.
     func recentText(limit: Int = HelperState.promptMax) -> String {
         var lines = window.map { "[\(HelperText.clock($0.t))] \($0.speaker.rawValue): \($0.text)" }
         for (who, p) in partial.sorted(by: { $0.key.rawValue < $1.key.rawValue }) where !p.text.isEmpty {
+            // The microphone's line in progress that repeats the others is the loudspeaker, not the user.
+            if Echo.isEcho(HeardLine(t: p.at, speaker: who, text: p.text), recentOthers: othersHeard) { continue }
             lines.append("[\(HelperText.clock(p.at))] \(who.rawValue): \(p.text)")
         }
         var out: [String] = [], size = 0
@@ -253,6 +296,7 @@ enum HelperPrompt {
             Never invent facts, numbers, laws or quotes. If something needs checking, say so in the tip.
             Each tip: 1 to 3 short lines the user can say or do now, and a "why" that names the claim it answers.
             Spot weak points, contradictions, unsupported claims and concessions on both sides; suggest the next line of argument.
+            Each tip answers something the Others actually said in the recent transcript (put it in "answers"). No generic advice: prefer asking for the evidence of a number or a law stated without proof, pointing out a contradiction between two lines, or proposing a concrete next step.
             A claim from a line marked "Me:" has side "me"; from a line marked "Others:", side "others".
             Answer in English, only with the JSON asked for.
             """
@@ -265,6 +309,7 @@ enum HelperPrompt {
         Nunca invente fatos, números, leis ou citações. Se algo precisa ser conferido, diga isso na dica.
         Cada dica: 1 a 3 linhas curtas que o usuário pode dizer ou fazer agora, e um "why" que nomeia a afirmação que ela responde.
         Aponte pontos fracos, contradições, afirmações sem prova e concessões dos dois lados; sugira a próxima linha de argumento.
+        Cada dica responde a algo que os Others disseram de fato na transcrição recente (ponha em "answers"). Nada de conselho genérico: prefira pedir a prova de um número ou de uma lei dita sem prova, apontar uma contradição entre duas falas, ou propor um próximo passo concreto.
         Uma afirmação de uma linha marcada "Me:" tem side "me"; de uma linha marcada "Others:", side "others".
         Responda em português (text, why, answers e summary), só com o JSON pedido.
         """
@@ -276,7 +321,7 @@ enum HelperPrompt {
     {"summary": "...", "claims": [{"side": "others" or "me", "text": "...", "kind": "claim" | "unsupported" | "contradiction" | "concession" | "weak"}], "tips": [{"text": "...", "why": "...", "answers": "...", "source": ""}]}
     """
 
-    static func user(_ s: HelperState, now: Double, lang: String) -> String {
+    static func user(_ s: HelperState, now: Double, lang: String, since: Double = -Double.infinity, listGiven: Bool = true) -> String {
         let en = lang == "en"
         var out = ""
         if !s.summary.isEmpty { out += (en ? "Earlier in the meeting (summary):\n" : "Antes, na reunião (resumo):\n") + s.summary + "\n\n" }
@@ -286,8 +331,13 @@ enum HelperPrompt {
             out += "\n"
         }
         out += (en ? "Recent transcript (Me = the user, Others = the other participants):\n" : "Transcrição recente (Me = o usuário, Others = os demais):\n") + s.recentText() + "\n\n"
+        // A small model keeps answering the first thing it read: the newest turn is named.
+        let turn = s.othersTurn(since: since)
+        if !turn.isEmpty {
+            out += (en ? "The Others' latest turn (answer this first):\n" : "A última fala dos Others (responda primeiro a ela):\n") + turn + "\n\n"
+        }
         let given = s.tips.filter { now - $0.t < HelperState.dedupSeconds }.suffix(10)
-        if !given.isEmpty {
+        if listGiven && !given.isEmpty {
             out += (en ? "Tips already given (do not repeat):\n" : "Dicas já dadas (não repita):\n") + given.map { "- " + $0.text }.joined(separator: "\n") + "\n\n"
         }
         out += (en ? "Answer with this JSON only, at most 3 tips:\n" : "Responda só com este JSON, no máximo 3 dicas:\n") + format
@@ -454,10 +504,28 @@ enum HelperSummary {
     }
 }
 
-// ---- live recognition: when to close an utterance ----
+// ---- live recognition: which tracks, and when to close an utterance ----
+
+enum LiveLanes {
+    /// SFSpeechRecognizer runs one on-device task per process: a second one
+    /// ends the first ("No speech detected", measured on macOS 26.6), so two
+    /// lanes would cancel each other forever. Without the analyzer only the
+    /// others are transcribed: they are what the tips answer and what the
+    /// cadence waits for. The analyzer runs both.
+    static func listens(_ who: Speaker, analyzer: Bool) -> Bool { analyzer || who == .others }
+}
 
 enum LiveCut {
-    static let quiet = 1.5, longest = 50.0
+    static let quiet = 1.5, longest = 50.0, drain = 3.0, hold = 5.0
+    /// After a cut, the ended request writes its final line; a new one opened
+    /// before that ends it and the line is lost (one task per process,
+    /// measured). The next request waits for it, `drain` seconds at most,
+    /// while up to `hold` seconds of audio wait to be replayed into it.
+    static func mayOpen(closingSince: Double?, now: Double) -> Bool {
+        guard let c = closingSince else { return true }
+        return now - c >= drain
+    }
+
     /// The recognizer gives a final line only when its request ends: end it
     /// after `quiet` seconds without a change, or when it nears the minute
     /// SFSpeechRecognizer allows a request.

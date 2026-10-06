@@ -102,6 +102,21 @@ struct HelperTests {
             for _ in 0..<10 { c.begin(now: 0); c.end(ok: false, now: 1000) }
             check(c.shouldAsk(now: 1301, othersWords: 50, othersLastHeard: 1290), "the backoff stops at 5 minutes")
             check(!Cadence().shouldAsk(now: 10, othersWords: 50, othersLastHeard: nil), "nothing heard: no request")
+            var v = HelperState(lang: "pt")
+            v.hear(.others, words(20), final: true, at: 5)
+            v.sound(.others, dB: -20, at: 9)
+            check(!v.shouldAsk(now: 10) && v.shouldAsk(now: 11.5), "the others' sound holds the request until their pause, even with no new words")
+            v.sound(.others, dB: -70, at: 12)
+            check(v.shouldAsk(now: 12), "background noise is not the others talking")
+            v.sound(.me, dB: -10, at: 12)
+            check(v.shouldAsk(now: 12), "the user's voice does not hold the tips")
+            v.hear(.others, "a linha final que chegou atrasada", final: true, at: 12.5)
+            v.hear(.others, "um pedaço revisado", final: false, at: 12.6)
+            check(v.shouldAsk(now: 12.7), "with the sound measured, a late line does not hold the request")
+            var w = HelperState(lang: "pt")
+            w.hear(.others, words(20), final: true, at: 5)
+            w.hear(.others, "linha tardia", final: true, at: 7)
+            check(!w.shouldAsk(now: 8) && w.shouldAsk(now: 9.5), "without the sound, the text says when the others pause")
         }
 
         // ---- the brain loop, with a fake brain ----
@@ -139,6 +154,15 @@ struct HelperTests {
             check(s.finishAsk(.success(r2), now: 400).isEmpty, "a tip that matches one from 5 min ago (case, accents, punctuation) is dropped")
             check(s.finishAsk(.success(r2), now: 701).count == 1, "after 10 minutes it may come back")
             check(!s.accept(HelperTip(t: 0, text: "  ", why: "", answers: "", source: nil), now: 0), "an empty tip is never shown")
+            // Seen live: the on-device model rewrote the end of a tip it had given.
+            var t = HelperState(lang: "pt")
+            var r3 = BrainReply(); r3.tips = [("Pergunte ao empreiteiro sobre a planilha que ele mencionou.", "", "", nil)]
+            t.finishAsk(.success(r3), now: 10)
+            var r4 = BrainReply(); r4.tips = [("Pergunte ao empreiteiro sobre a planilha que está faltando.", "", "", nil),
+                                              ("Pergunte ao responsável pelo orçamento se há uma planilha disponível.", "", "", nil)]
+            let got = t.finishAsk(.success(r4), now: 40)
+            check(got.count == 1 && got[0].text.hasPrefix("Pergunte ao responsável"), "a reworded repeat is dropped, a different tip on the same subject is kept",
+                  got.map { $0.text }.joined(separator: " | "))
         }
 
         // ---- echo and sides ----
@@ -149,6 +173,13 @@ struct HelperTests {
             check(s.window.count == 1 && s.window[0].speaker == .others, "the loudspeaker heard by the microphone is dropped (echo)")
             s.hear(.me, "condomínio não tem dinheiro para pintar", final: true, at: 40)
             check(s.window.count == 2 && s.window[1].speaker == .me, "the same words long after are the user's")
+            var r = HelperState(lang: "pt")
+            r.hear(.me, "a taxa extra vai ser de oitocentos reais", final: true, at: 70)
+            r.hear(.others, "porque a taxa extra vai ser de oitocentos reais por mês", final: true, at: 71)
+            check(r.window.count == 1 && r.window[0].speaker == .others, "an echo that came out before the others' line is dropped when that line arrives")
+            r.hear(.me, "eu não concordo com essa taxa", final: true, at: 72)
+            r.hear(.others, "a taxa é pequena", final: true, at: 73)
+            check(r.window.count == 3 && r.window[1].speaker == .me, "the user's own line stays when the others speak next")
             s.hear(.me, "eu discordo totalmente desse valor", final: true, at: 41)
             check(s.window.count == 3, "a different line of the user is kept")
             check(!Echo.isEcho(HeardLine(t: 1, speaker: .me, text: "sim"), recentOthers: [HeardLine(t: 1, speaker: .others, text: "sim")]),
@@ -160,6 +191,12 @@ struct HelperTests {
             check(s.ledger.first { $0.text.hasPrefix("Eu discordo") }?.side == .me, "a claim that repeats a heard line takes that line's side (the track wins)")
             check(s.ledger.first { $0.text.hasPrefix("uma ideia") }?.side == .me, "a claim no line matches keeps the brain's side")
             check(s.recentText().contains("Others: o condomínio") && s.recentText().contains("Me: eu discordo"), "the prompt labels each line with its track's speaker")
+            var e = HelperState(lang: "pt")
+            e.hear(.others, "a obra custa trezentos mil reais", final: false, at: 50)
+            e.hear(.me, "obra custa trezentos mil", final: false, at: 51)
+            check(!e.recentText().contains("Me:") && e.recentText().contains("Others: a obra custa"), "the microphone's echo in progress stays out of the prompt")
+            e.hear(.me, "quero ver os três orçamentos", final: false, at: 52)
+            check(e.recentText().contains("Me: quero ver os três orçamentos"), "the user's own line in progress goes to the prompt")
         }
 
         // ---- window and summary ----
@@ -181,6 +218,8 @@ struct HelperTests {
         do {
             let pt = HelperPrompt.system(lang: "pt", research: false), en = HelperPrompt.system(lang: "en", research: true)
             check(pt.contains("Nunca invente") && pt.contains("Sem insultos") && pt.contains("enganosas") && pt.contains("português"), "the pt rules")
+            check(pt.contains("Nada de conselho genérico") && en.contains("No generic advice") && pt.contains("ponha em \"answers\"") && en.contains("put it in \"answers\""),
+                  "a tip answers something the others said, never generic advice")
             check(en.contains("Never invent") && en.contains("No insults") && en.contains("deceptive") && en.contains("\"source\""), "the en rules, research cites its source")
             check(!pt.contains("pesquisar") && HelperPrompt.system(lang: "pt", research: true).contains("URL"), "research only when asked")
             var s = HelperState(lang: "pt")
@@ -189,7 +228,16 @@ struct HelperTests {
             s.finishAsk(.success(r), now: 2)
             let req = s.beginAsk(now: 30, research: false)
             check(req.prompt.contains("Dica antiga") && req.prompt.contains("não repita"), "the prompt lists the tips already given")
+            var small = s
+            let local = small.beginAsk(now: 30, research: false, small: true)
+            check(!local.prompt.contains("Dica antiga") && !local.prompt.contains("não repita"), "the on-device model is not handed the tips it would copy back")
             check(req.prompt.contains("Others [unsupported]: afirmação X"), "the prompt carries the ledger with sides")
+            s.finishAsk(.success(BrainReply()), now: 31)
+            s.hear(.others, "a lei proíbe usar o fundo de reserva", final: true, at: 40)
+            s.hear(.others, "e a taxa extra é pequena", final: false, at: 41)
+            let req2 = s.beginAsk(now: 60, research: false)
+            let turn = req2.prompt.components(separatedBy: "A última fala dos Others (responda primeiro a ela):\n").last?.components(separatedBy: "\n\n").first ?? ""
+            check(turn == "a lei proíbe usar o fundo de reserva\ne a taxa extra é pequena", "the prompt names the others' turn since the last request, in progress included", turn)
             check(req.lang == "pt" && req.prompt.contains("\"tips\""), "the prompt asks for the JSON")
             let all = [pt, en, HelperPrompt.format, req.prompt] + Array(HelperTexts.pt.values) + Array(HelperTexts.en.values)
             check(!all.contains { $0.contains("\u{2014}") || $0.contains("\u{2013}") }, "no em-dash or en-dash anywhere")
@@ -319,6 +367,12 @@ struct HelperTests {
 
         // ---- live recognition: when a line is cut ----
         do {
+            check(LiveCut.mayOpen(closingSince: nil, now: 0), "nothing closing: a request opens")
+            check(!LiveCut.mayOpen(closingSince: 10, now: 11), "a request still writing its line is not ended by the next one")
+            check(LiveCut.mayOpen(closingSince: 10, now: 13.1), "a closing request that never answers does not block forever")
+            check(LiveLanes.listens(.me, analyzer: true) && LiveLanes.listens(.others, analyzer: true), "the analyzer transcribes both tracks")
+            check(LiveLanes.listens(.others, analyzer: false) && !LiveLanes.listens(.me, analyzer: false),
+                  "SFSpeechRecognizer (one task per process) transcribes the others only")
             check(!LiveCut.shouldCut(requestStarted: 0, lastChange: 10, hasText: true, now: 11), "speech still changing: no cut")
             check(LiveCut.shouldCut(requestStarted: 0, lastChange: 10, hasText: true, now: 11.6), "1.5 s without change: the line ends")
             check(!LiveCut.shouldCut(requestStarted: 0, lastChange: nil, hasText: false, now: 30), "silence alone: no cut")

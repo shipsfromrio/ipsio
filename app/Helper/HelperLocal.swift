@@ -80,7 +80,7 @@ final class LocalBrain: HelperBrain {
         let tip = DynamicGenerationSchema(name: "Tip", properties: [
             .init(name: "text", description: d("1 to 3 short lines the user can say now", "1 a 3 linhas curtas que o usuário pode dizer agora"), schema: str),
             .init(name: "why", description: d("why it helps, naming the claim it answers", "por que ajuda, citando a afirmação que responde"), schema: str),
-            .init(name: "answers", description: d("the claim it answers", "a afirmação que responde"), schema: str),
+            .init(name: "answers", description: d("the Others' line this tip answers, quoted", "a fala dos Others que esta dica responde, citada"), schema: str),
         ])
         let root = DynamicGenerationSchema(name: "HelperReply", properties: [
             .init(name: "summary", description: d("a compact running summary of the meeting so far", "um resumo curto da reunião até aqui"), schema: str),

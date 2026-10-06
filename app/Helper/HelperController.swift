@@ -118,6 +118,12 @@ final class HelperController: NSObject {
                             s.state?.hear(who, text, final: final, at: s.now())
                         }
                     }
+                    lt.onSound = { [weak self] who, dB in
+                        DispatchQueue.main.async {
+                            guard let s = self, my == s.session else { return }
+                            s.state?.sound(who, dB: dB, at: s.now())
+                        }
+                    }
                     lt.start()
                     self.backend().audioTap = { [weak lt] track, sb in lt?.feed(track, sb) }
                     let tm = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in self?.tick(my) }
@@ -136,7 +142,7 @@ final class HelperController: NSObject {
         guard my == session, var s = state, let b = brain else { return }
         let n = now()
         guard s.shouldAsk(now: n) else { return }
-        let req = s.beginAsk(now: n, research: b.kind == .cloud)
+        let req = s.beginAsk(now: n, research: b.kind == .cloud, small: b.kind == .local)
         state = s
         panel.setStatus(t("status_thinking"))
         Task {
@@ -158,7 +164,9 @@ final class HelperController: NSObject {
         attempted = false; session += 1
         timer?.invalidate(); timer = nil
         backend().audioTap = nil
-        live?.stop(); live = nil
+        // The line in progress when the recording stopped still goes to the summary.
+        let last = live?.stop() ?? []; live = nil
+        for (who, text) in last { state?.hear(who, text, final: true, at: now()) }
         let s = state, b = brain, file = media, name = title, l = lang()
         state = nil; brain = nil; media = nil
         panel.setStatus(t("status_idle"))
