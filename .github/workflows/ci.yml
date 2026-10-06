@@ -26,7 +26,7 @@ jobs:
       - name: build the app, ipsio-calendar and the device creator
         run: |
           swiftc --version
-          swiftc -O -parse-as-library app/Schedule.swift app/MacCalendar.swift app/Setup.swift app/SetupWindow.swift app/HotKey.swift app/Engine/*.swift app/Store/*.swift app/Transcribe/*.swift app/Ipsio.swift -framework AppKit -o "$RUNNER_TEMP/Ipsio"
+          swiftc -O -parse-as-library app/Schedule.swift app/MacCalendar.swift app/Setup.swift app/SetupWindow.swift app/MeetingDetect.swift app/Search.swift app/SearchWindow.swift app/HotKey.swift app/Engine/*.swift app/Store/*.swift app/Transcribe/*.swift app/Ipsio.swift -framework AppKit -o "$RUNNER_TEMP/Ipsio"
           swiftc -O -parse-as-library app/Schedule.swift app/MacCalendar.swift app/CalendarCLI.swift -o "$RUNNER_TEMP/ipsio-calendar"
           swiftc -O tools/create-device.swift -o "$RUNNER_TEMP/create-device"
       - name: calendar bench
@@ -54,6 +54,12 @@ jobs:
         run: |
           swiftc -parse-as-library app/HotKey.swift tests/HotKeyTests.swift -o "$RUNNER_TEMP/hotkey-tests"
           "$RUNNER_TEMP/hotkey-tests"
+      - name: meeting detection and search benches
+        run: |
+          swiftc -parse-as-library app/MeetingDetect.swift tests/MeetingDetectTests.swift -o "$RUNNER_TEMP/detect-tests"
+          "$RUNNER_TEMP/detect-tests"
+          swiftc -parse-as-library app/Search.swift tests/SearchTests.swift -o "$RUNNER_TEMP/search-tests"
+          "$RUNNER_TEMP/search-tests"
       - name: license bench (trial and lifetime purchase)
         run: |
           swiftc -parse-as-library app/Store/License.swift tests/LicenseTests.swift -o "$RUNNER_TEMP/license-tests"

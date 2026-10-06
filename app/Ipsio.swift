@@ -26,6 +26,7 @@
 import AppKit
 import AVFoundation
 import CoreGraphics
+import ScreenCaptureKit
 import ServiceManagement
 import UserNotifications
 
@@ -69,6 +70,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     let connectItem = NSMenuItem(title: "", action: #selector(doConnectCalendar), keyEquivalent: "")
     let languageItem = NSMenuItem(title: "", action: #selector(doLanguage), keyEquivalent: "")
     let hotKeysItem = NSMenuItem(title: "", action: #selector(doHotKeys), keyEquivalent: "")
+    let searchItem = NSMenuItem(title: "", action: #selector(doSearch), keyEquivalent: "")
+    let detectItem = NSMenuItem(title: "", action: #selector(doDetectToggle), keyEquivalent: "")
     // Our own action, not the system's terminate:: on macOS 26 the standard quit
     // action gets an automatic icon, which opens an icon column and indents the
     // whole menu.
@@ -129,6 +132,16 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "transcribing": "Transcrevendo…", "open_transcript": "Abrir a transcrição",
             "transcribe_auto": "Transcrever cada gravação ao parar", "transcribed_title": "Transcrição pronta",
             "transcribe_failed": "A transcrição não foi feita",
+            "detect_title": "Reunião no %@ aberta", "detect_body": "Quer gravar? Toque em Gravar.", "detect_record": "Gravar",
+            "detect_menu": "Oferecer gravar quando abrir uma reunião",
+            "search_menu": "Buscar nas gravações…", "search_title": "Buscar nas gravações", "search_placeholder": "Palavras ditas ou nome do arquivo",
+            "search_col_file": "Gravação", "search_col_time": "Tempo", "search_col_speaker": "Quem", "search_col_snippet": "Trecho",
+            "search_me": "Eu", "search_others": "Outros",
+            "search_hint": "Busca nas transcrições e nos nomes das gravações. Acentos e maiúsculas não importam.",
+            "search_running": "Buscando…", "search_none": "Nada encontrado.",
+            "search_one": "1 resultado. Duplo clique mostra a gravação e copia o tempo.",
+            "search_many": "%@ resultados. Duplo clique mostra a gravação e copia o tempo.",
+            "search_gone": "A gravação não está mais na pasta.", "search_copied": "Tempo %@ copiado.",
             "hotkeys": "Atalhos ⌃⌥⌘R (gravar/parar) e ⌃⌥⌘T (testar)",
             "login": "Abrir ao iniciar a sessão", "login_failed": "O macOS não aceitou o item de login",
             "language": "Switch to English  🇺🇸", "restart": "Reiniciar o app", "quit": "Sair (até o próximo login)",
@@ -210,6 +223,16 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "transcribing": "Transcribing…", "open_transcript": "Open the transcript",
             "transcribe_auto": "Transcribe each recording on stop", "transcribed_title": "Transcript ready",
             "transcribe_failed": "The transcription was not made",
+            "detect_title": "%@ meeting open", "detect_body": "Record it? Click Record.", "detect_record": "Record",
+            "detect_menu": "Offer to record when a meeting opens",
+            "search_menu": "Search recordings…", "search_title": "Search recordings", "search_placeholder": "Words said or file name",
+            "search_col_file": "Recording", "search_col_time": "Time", "search_col_speaker": "Who", "search_col_snippet": "What was said",
+            "search_me": "Me", "search_others": "Others",
+            "search_hint": "Searches transcripts and recording names. Accents and case do not matter.",
+            "search_running": "Searching…", "search_none": "Nothing found.",
+            "search_one": "1 result. Double-click shows the recording and copies the time.",
+            "search_many": "%@ results. Double-click shows the recording and copies the time.",
+            "search_gone": "The recording is no longer in the folder.", "search_copied": "Time %@ copied.",
             "hotkeys": "Shortcuts ⌃⌥⌘R (record/stop) and ⌃⌥⌘T (test)",
             "login": "Open at login", "login_failed": "macOS refused the login item",
             "language": "Mudar para português  🇧🇷", "restart": "Restart the app", "quit": "Quit (until next login)",
@@ -320,19 +343,19 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         // Without this NSMenu re-enables every item that has an action by
         // itself, and "Record" stayed clickable during a recording.
         for m in [menu, recentMenu, upcomingMenu, modeMenu, permMenu] { m.autoenablesItems = false }
-        for m in [recordItem, stopItem, checkItem, testItem, modeClass, modeMeeting, titleItem, folderItem, openItem, permScreen, permMic, doctorItem, connectItem, languageItem, hotKeysItem, restartItem, quitItem, loginItem, buyItem, restoreItem] { m.target = self }
+        for m in [recordItem, stopItem, checkItem, testItem, modeClass, modeMeeting, titleItem, folderItem, openItem, permScreen, permMic, doctorItem, connectItem, languageItem, hotKeysItem, searchItem, detectItem, restartItem, quitItem, loginItem, buyItem, restoreItem] { m.target = self }
         licenseItem.isEnabled = false
         statusItem.isEnabled = false; calendarStatus.isEnabled = false
         menu.addItem(statusItem); menu.addItem(calendarStatus); menu.addItem(.separator())
         menu.addItem(recordItem); menu.addItem(stopItem); menu.addItem(checkItem); menu.addItem(testItem); menu.addItem(.separator())
         modeMenu.addItem(modeClass); modeMenu.addItem(modeMeeting); modeItem.submenu = modeMenu; menu.addItem(modeItem)
         upcomingItem.submenu = upcomingMenu; menu.addItem(upcomingItem)
-        recentItem.submenu = recentMenu; menu.addItem(recentItem)
+        recentItem.submenu = recentMenu; menu.addItem(recentItem); menu.addItem(searchItem)
         menu.addItem(openItem); menu.addItem(titleItem); menu.addItem(folderItem)
         permMenu.addItem(permScreen); permMenu.addItem(permMic); permItem.submenu = permMenu; menu.addItem(permItem)
         menu.addItem(connectItem); menu.addItem(doctorItem)
         menu.addItem(.separator()); menu.addItem(licenseItem); menu.addItem(buyItem); menu.addItem(restoreItem)
-        menu.addItem(languageItem); menu.addItem(hotKeysItem)
+        menu.addItem(languageItem); menu.addItem(hotKeysItem); menu.addItem(detectItem)
         #if STORE
         menu.addItem(loginItem)
         #endif
@@ -344,6 +367,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         if hasBundle {
             let center = UNUserNotificationCenter.current()
             center.delegate = self
+            let rec = UNNotificationAction(identifier: "ipsio.record", title: t("detect_record"), options: [])
+            center.setNotificationCategories([UNNotificationCategory(identifier: "ipsio.meeting", actions: [rec], intentIdentifiers: [], options: [])])
             center.requestAuthorization(options: [.alert, .sound]) { ok, _ in DispatchQueue.main.async { self.notificationsOk = ok } }
         }
         MacCalendar.install()
@@ -358,6 +383,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         RunLoop.main.add(t1, forMode: .common); timer = t1
         let t2 = Timer(timeInterval: 300, repeats: true) { _ in self.readCalendar() }
         RunLoop.main.add(t2, forMode: .common); calendarTimer = t2
+        let t3 = Timer(timeInterval: 15, repeats: true) { _ in self.detectMeeting() }
+        RunLoop.main.add(t3, forMode: .common); detectTimer = t3
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in self.readCalendar() }
         readCalendar()
         // Microphone first (one "Allow" on the spot), screen after (Settings
@@ -369,6 +396,43 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         if !CGPreflightScreenCaptureAccess() { askScreenPermission() }
         openSetupIfNeeded()
         startHotKeys()
+    }
+
+    // ---- an open call (app/MeetingDetect.swift) and search (app/Search.swift) ----
+    var detectTimer: Timer?
+    var detectDebounce = MeetingDetect.Debounce()
+    var detecting = false
+    lazy var searchWindow = SearchWindow(app: self)
+    @objc func doSearch() { searchWindow.show() }
+    @objc func doDetectToggle() {
+        var c = readConf(); c["DETECT_MEETINGS"] = c["DETECT_MEETINGS"] == "0" ? "1" : "0"; writeConf(c); refresh()
+    }
+    func detectMeeting() {
+        guard readConf()["DETECT_MEETINGS"] != "0", !detecting, !busy, !waitingPermission,
+              notificationsOk, hasBundle, CGPreflightScreenCaptureAccess() else { return }
+        let rec = recording()
+        let spans = meetings.filter { !skipped.contains($0.id) }.map { (start: $0.start, end: $0.end) }
+        let soon = MeetingDetect.calendarSoon(now: Date(), spans: spans)
+        let apps = NSWorkspace.shared.runningApplications.compactMap { $0.bundleIdentifier }
+        detecting = true
+        // All windows, not only on screen: a minimized call is still a call
+        // (with on-screen only, it was forgotten and offered again).
+        SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: false) { content, _ in
+            let wins = (content?.windows ?? []).compactMap { w -> (bundleID: String, title: String)? in
+                guard let id = w.owningApplication?.bundleIdentifier, let t = w.title, !t.isEmpty else { return nil }
+                return (bundleID: id, title: t)
+            }
+            DispatchQueue.main.async {
+                self.detecting = false
+                let m = MeetingDetect.detect(apps: apps, windows: wins)
+                guard let offer = self.detectDebounce.step(m, now: Date(), recording: rec || self.recording(), calendarSoon: soon) else { return }
+                // An offer needs its button: no popup fallback (it would nag on every call).
+                let c = UNMutableNotificationContent()
+                c.title = self.t("detect_title", offer.app); c.body = self.t("detect_body"); c.sound = .default
+                c.categoryIdentifier = "ipsio.meeting"
+                UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "ipsio.meeting." + offer.key, content: c, trigger: nil))
+            }
+        }
     }
 
     // ---- global shortcuts (app/HotKey.swift) ----
@@ -434,7 +498,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     func userNotificationCenter(_ c: UNUserNotificationCenter, willPresent n: UNNotification, withCompletionHandler h: @escaping (UNNotificationPresentationOptions) -> Void) { h([.banner, .sound]) }
     // Clicking the "saved" notification shows the recording in Finder.
     func userNotificationCenter(_ c: UNUserNotificationCenter, didReceive r: UNNotificationResponse, withCompletionHandler h: @escaping () -> Void) {
-        if let p = r.notification.request.content.userInfo["file"] as? String, FileManager.default.fileExists(atPath: p) {
+        if r.actionIdentifier == "ipsio.record" {
+            // A call: record it with the microphone, like a calendar meeting.
+            DispatchQueue.main.async { if !self.recording() && !self.busy { self.startRecording(mode: "meeting") } }
+        } else if let p = r.notification.request.content.userInfo["file"] as? String, FileManager.default.fileExists(atPath: p) {
             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
         }
         h()
@@ -638,7 +705,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         permItem.title = t("perm"); permScreen.title = t("perm_screen"); permMic.title = t("perm_mic")
         doctorItem.title = t("doctor"); doctorItem.isEnabled = !busy
         connectItem.title = Sources(dir: dir, conf: readConf()).configured.contains { $0 == "ics" || $0 == "macos" } ? t("connect_again") : t("connect")
-        languageItem.title = t("language"); hotKeysItem.title = t("hotkeys"); hotKeysItem.state = HotKeys.enabled(readConf()["HOTKEYS"]) ? .on : .off; restartItem.title = t("restart"); quitItem.title = t("quit")
+        languageItem.title = t("language"); hotKeysItem.title = t("hotkeys"); searchItem.title = t("search_menu"); detectItem.title = t("detect_menu"); detectItem.state = readConf()["DETECT_MEETINGS"] == "0" ? .off : .on; hotKeysItem.state = HotKeys.enabled(readConf()["HOTKEYS"]) ? .on : .off; restartItem.title = t("restart"); quitItem.title = t("quit")
         // The recording lives in this process now: restarting would cut it.
         restartItem.isEnabled = !on && !busy
         loginItem.title = t("login"); loginItem.state = loginOn ? .on : .off
@@ -924,13 +991,14 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     }
 
     // ---- actions ----
-    @objc func doRecord() {
+    @objc func doRecord() { startRecording(mode: mode) }
+    func startRecording(mode m: String) {
         guard licenseAllows(explain: true) else { refresh(); return }
-        guard permissionsOk(explain: true, meeting: mode == "meeting") else { refresh(); return }
+        guard permissionsOk(explain: true, meeting: m == "meeting") else { refresh(); return }
         alarmGiven = false; micAlarmGiven = false
         busy = true; refresh()
         DispatchQueue.global().async {
-            let r = self.run("start")
+            let r = self.run("start", env: ["IPSIO_MODE": m])
             DispatchQueue.main.async {
                 self.busy = false; self.refresh()
                 let s = self.parse(r)
