@@ -541,7 +541,10 @@ struct Sources {
         var f: [String] = []
         if FileManager.default.fileExists(atPath: urlFile) { f.append("ics") }
         if FileManager.default.fileExists(atPath: listFile) { f.append("list") }
+        // The store build runs no commands: a CALENDAR_COMMAND there is ignored.
+        #if !STORE
         if !(conf["CALENDAR_COMMAND"] ?? "").isEmpty { f.append("command") }
+        #endif
         if conf["CALENDAR_MACOS"] == "1" { f.append("macos") }
         return f
     }

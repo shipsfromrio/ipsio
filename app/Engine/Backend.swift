@@ -7,7 +7,7 @@
 // bench drives every verdict with no screen, no microphone and no permission.
 //
 // The recording now lives inside the app's process. Two small files in the
-// state folder keep the old watchdog contract: "file" and "mode" exist while a
+// state folder keep the old watchdog contract: "recording" and "recording-mode" exist while a
 // recording runs and are removed by stop. Found at launch with no capture
 // behind them, they mean the app (or the Mac) went down mid-recording: the
 // fragmented .mov is still there, and stop closes the books on it.
@@ -90,8 +90,10 @@ final class Backend {
         self.dir = dir; self.capture = capture; self.host = host; self.conf = conf
     }
 
-    var fileRec: String { dir + "/file" }
-    var modeRec: String { dir + "/mode" }
+    // Not "file" and "mode": the legacy ipsio.sh writes those, and a script
+    // recording would read here as a crashed one (stop would close it under ffmpeg).
+    var fileRec: String { dir + "/recording" }
+    var modeRec: String { dir + "/recording-mode" }
 
     var recording: Bool { capture.recording }
     /// The watchdog's signal: the system stopped the capture, or a recording

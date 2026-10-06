@@ -31,6 +31,10 @@ VERSION=$(git describe --tags --always 2>/dev/null || echo dev)
 # of a recording that gains nothing and may lose its end.
 if [ -f "$DIR/pid" ] && kill -0 "$(cat "$DIR/pid")" 2>/dev/null; then
   echo "REFUSED: an Ipsio recording is in progress. Stop it and run again."; exit 1; fi
+# The native engine records inside the app: "recording" exists while it records
+# (or was left by a crash, which the app closes when it opens).
+if [ -f "$DIR/recording" ]; then
+  echo "REFUSED: an Ipsio recording is in progress (or was cut short: open Ipsio so it closes it). Stop it and run again."; exit 1; fi
 
 mkdir -p "$DIR" && chmod 700 "$DIR"
 [ -f "$DIR/calendar.url" ] && chmod 600 "$DIR/calendar.url"
@@ -52,7 +56,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSHighResolutionCapable</key><true/>
   <key>NSCalendarsFullAccessUsageDescription</key><string>Ipsio reads your meetings from the Calendar app to record them at the right time. Nothing leaves the Mac. / O Ipsio lê as reuniões do app Calendário para gravá-las na hora certa. Nada sai do Mac.</string>
   <key>NSCalendarsUsageDescription</key><string>Ipsio reads your meetings from the Calendar app to record them at the right time. Nothing leaves the Mac. / O Ipsio lê as reuniões do app Calendário para gravá-las na hora certa. Nada sai do Mac.</string>
-  <key>NSMicrophoneUsageDescription</key><string>Ipsio records the computer sound (through BlackHole) and, in meeting mode, your voice. / O Ipsio grava o som do computador (pelo BlackHole) e, no modo reunião, a sua voz.</string>
+  <key>NSMicrophoneUsageDescription</key><string>In meeting mode, Ipsio records your voice in its own track. It stays on this Mac. / No modo reunião, o Ipsio grava a sua voz numa faixa própria. Ela fica neste Mac.</string>
 </dict></plist>
 PLIST
 echo "== icon =="
@@ -73,17 +77,15 @@ echo "== building =="
 # Into a temporary folder first: a failed build must not leave the KeepAlive
 # LaunchAgent pointing at a deleted binary.
 B=$(mktemp -d)
-swiftc -O -parse-as-library app/Schedule.swift app/MacCalendar.swift app/Setup.swift app/SetupWindow.swift app/Engine/*.swift app/Ipsio.swift -framework AppKit -o "$B/Ipsio" 2>&1 | grep -v warning || true
+swiftc -O -parse-as-library app/Schedule.swift app/MacCalendar.swift app/Setup.swift app/SetupWindow.swift app/Engine/*.swift app/Store/*.swift app/Ipsio.swift -framework AppKit -o "$B/Ipsio" 2>&1 | grep -v warning || true
 swiftc -O -parse-as-library app/Schedule.swift app/MacCalendar.swift app/CalendarCLI.swift -o "$B/ipsio-calendar" 2>&1 | grep -v warning || true
-# Inside the app, so the setup window's "Create" button needs no Terminal.
-swiftc -O tools/create-device.swift -o "$B/create-device" 2>&1 | grep -v warning || true
-[ -x "$B/Ipsio" ] && [ -x "$B/ipsio-calendar" ] && [ -x "$B/create-device" ] || { rm -rf "$B"; echo "build failed; the installed app was left as it was"; exit 1; }
-mv -f "$B/Ipsio" "$B/ipsio-calendar" "$B/create-device" "$APP/Contents/MacOS/" && rm -rf "$B"
+[ -x "$B/Ipsio" ] && [ -x "$B/ipsio-calendar" ] || { rm -rf "$B"; echo "build failed; the installed app was left as it was"; exit 1; }
+rm -f "$APP/Contents/MacOS/create-device"   # the native engine needs no output device
+mv -f "$B/Ipsio" "$B/ipsio-calendar" "$APP/Contents/MacOS/" && rm -rf "$B"
 echo "== signing =="
 if security find-identity -p codesigning 2>/dev/null | grep -q "\"$IDENT\""; then SIGN="$IDENT"
 else SIGN="-"; echo "WARNING: no '$IDENT' certificate, signing ad hoc; permissions are lost on every rebuild. Run: bash certificate.sh"; fi
 codesign -s "$SIGN" --force -i "$BID.calendar" "$APP/Contents/MacOS/ipsio-calendar" 2>&1 | grep -v "replacing existing" || true
-codesign -s "$SIGN" --force -i "$BID.create-device" "$APP/Contents/MacOS/create-device" 2>&1 | grep -v "replacing existing" || true
 codesign -s "$SIGN" --force "$APP" 2>&1 | grep -v "replacing existing" || true
 codesign --verify --strict "$APP" || { echo "invalid signature"; exit 1; }
 codesign -dr - "$APP" 2>&1 | tail -1
@@ -93,9 +95,12 @@ if ! grep -q 'alias ipsio-calendar=' ~/.zshrc 2>/dev/null; then
   cat >> ~/.zshrc <<ALIASES
 
 # Ipsio
-alias ipsio='bash "$APP/Contents/Resources/ipsio.sh"'
 alias ipsio-calendar='"$APP/Contents/MacOS/ipsio-calendar"'
 ALIASES
+fi
+# The Terminal recipe (ipsio.sh) needs ffmpeg and BlackHole: install.sh --with-script.
+if command -v ffmpeg >/dev/null 2>&1 && ! grep -q "alias ipsio='" ~/.zshrc 2>/dev/null; then
+  echo "alias ipsio='bash \"$APP/Contents/Resources/ipsio.sh\"'" >> ~/.zshrc
 fi
 echo "== LaunchAgent =="
 LA=~/Library/LaunchAgents/$LABEL.plist

@@ -84,6 +84,29 @@ engine_mutant Backend.swift "the test take gets evidence" 'if !testTake { afterS
 engine_mutant Backend.swift "the test take is left on disk" 'try? FileManager.default.removeItem(atPath: file)' ''
 engine_mutant Backend.swift "silence counts as 0 dB in the mean" '($1.isFinite ? pow(10, Double($1) / 10) : 0)' '($1.isFinite ? pow(10, Double($1) / 10) : 1)'
 engine_mutant Texts.swift "an argument is filled twice" 'out += a[n - 1]; i += 2' 'out += a[n - 1]; i += 2; out = fill(out, a)'
+# The license (store build): the trial and the purchase.
+store_mutant() { # <name> <original text> <broken text>
+  rm -rf "$T/Store"; mkdir -p "$T/Store"
+  python3 - "$ROOT/app/Store/License.swift" "$T/Store/License.swift" "$2" "$3" <<'PY' || { echo "ERROR: the snippet for mutant '$1' is no longer in License.swift"; ALIVE=$((ALIVE+1)); return; }
+import sys
+src, dst, a, b = sys.argv[1:5]
+s = open(src, encoding="utf-8").read()
+if a not in s: sys.exit(1)
+open(dst, "w", encoding="utf-8").write(s.replace(a, b, 1))
+PY
+  if ! swiftc -parse-as-library "$T/Store/License.swift" "$ROOT/tests/LicenseTests.swift" -o "$T/l" 2>"$T/err"; then
+    echo "ERROR: mutant '$1' does not compile"; tail -3 "$T/err"; ALIVE=$((ALIVE+1)); return; fi
+  if "$T/l" >/dev/null 2>&1; then echo "SURVIVED: $1"; ALIVE=$((ALIVE+1)); else echo "killed: $1"; fi
+}
+store_mutant "gpl not unlocked" 'if build == .gpl { return .unlocked(.gpl) }' ''
+store_mutant "purchase ignored" 'if purchased { return .unlocked(.purchased) }' ''
+store_mutant "day 7 still trial" 'if left <= 0 { return .expired }' 'if left < 0 { return .expired }'
+store_mutant "last seen ignored (clock back extends trial)" 'max(now, lastSeen ?? now)' 'now'
+store_mutant "clock before first launch grants more than 7 days" 'let elapsed = max(0, effective.timeIntervalSince(firstLaunch))' 'let elapsed = effective.timeIntervalSince(firstLaunch)'
+store_mutant "latest first launch wins" 'let first = firsts.min() ?? now' 'let first = firsts.max() ?? now'
+store_mutant "defaults ignored (deleting the file resets the trial)" 'let firsts = [f.first, defaultsDate(Self.firstKey)].compactMap { $0 }' 'let firsts = [f.first].compactMap { $0 }'
+store_mutant "last seen not persisted" 'let seen = max(seens.max() ?? now, now)' 'let seen = now'
+store_mutant "trial blocks recording" 'if case .expired = s { return false }' 'if case .trial = s { return false }'
 echo
 [ "$ALIVE" -eq 0 ] && echo "all mutants killed" || echo "$ALIVE mutant(s) alive"
 [ "$ALIVE" -eq 0 ]

@@ -54,7 +54,7 @@ final class SetupWindow: NSObject, NSWindowDelegate {
     private func texts() {
         window.title = app.t("setup_title")
         header.stringValue = app.t("setup_intro")
-        zoomLine.stringValue = "ⓘ  " + app.t("setup_zoom", app.deviceName())
+        zoomLine.stringValue = "ⓘ  " + app.t("setup_zoom")
         testButton.title = app.t("test"); closeButton.title = app.t("setup_close")
     }
 
@@ -114,7 +114,7 @@ final class SetupWindow: NSObject, NSWindowDelegate {
         icon.contentTintColor = item.ok ? .systemGreen : (item.required ? .systemRed : .secondaryLabelColor)
         icon.symbolConfiguration = .init(pointSize: 16, weight: .regular)
         icon.setContentHuggingPriority(.required, for: .horizontal)
-        let title = NSTextField(labelWithString: app.t("setup_" + item.key, app.deviceName()))
+        let title = NSTextField(labelWithString: app.t("setup_" + item.key))
         title.font = .systemFont(ofSize: 13, weight: item.ok ? .regular : .semibold)
         let text = NSStackView(views: [title]); text.orientation = .vertical; text.alignment = .leading; text.spacing = 2
         if !item.ok {

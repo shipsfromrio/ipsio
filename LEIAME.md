@@ -12,38 +12,39 @@ O nome vem de *ipsis verbis*: tal como foi dito.
 ## O que ele resolve
 
 O macOS não grava o próprio som. O atalho Shift+Cmd+5 e o QuickTime gravam a
-tela muda, e você descobre no fim do dia. O Ipsio junta o que é preciso para
-isso não acontecer, e confere enquanto grava:
+tela muda, e você descobre no fim do dia. O Ipsio grava tela e som dentro do
+próprio app, pelo ScreenCaptureKit, sem driver e sem ferramenta extra, e
+confere enquanto grava:
 
 | O que dá errado | Como aparece | O que o Ipsio faz |
 |---|---|---|
-| Gravar com Shift+Cmd+5 / QuickTime | 8 h de vídeo, 228 GB, zero áudio | grava pelo driver BlackHole |
-| Trocar só a saída do sistema | o Zoom manda o som para o alto-falante que ELE escolheu; manhã inteira a -91 dB | o alto-falante dentro do Zoom/Teams é o dispositivo `Ipsio`; o medidor acusa em 90 s |
-| Conferir "tem faixa de áudio" | a faixa existia, e estava muda | mede VOLUME, uma amostra por segundo, no mesmo ffmpeg que grava |
-| A sua voz escondendo a faixa do computador muda | a mistura parece boa, os outros sumiram | o medidor, a conferência e o teste leem só a faixa do computador, nunca a mistura |
+| Gravar com Shift+Cmd+5 / QuickTime | 8 h de vídeo, 228 GB, zero áudio | pega o som do computador direto do macOS, no mesmo fluxo da tela |
+| O Zoom manda o som para o alto-falante que ELE escolheu | manhã inteira a -91 dB | grava o que o Mac toca, em qualquer alto-falante; nada a escolher no Zoom, no Teams ou no Meet, e a saída de som nunca é mexida |
+| Conferir "tem faixa de áudio" | a faixa existia, e estava muda | mede VOLUME, uma amostra por segundo, dos mesmos buffers que vão para o arquivo |
 | Descobrir o silêncio no fim | horas mudas | ícone amarelo e alerta com 90 s de silêncio |
 | Microfone sem permissão | o macOS não dá erro: entrega silêncio digital | microfone abaixo de -80 dB = mudo (voz fica perto de -32 dB, sala vazia perto de -60); alerta em 90 s |
-| Mac dorme ou apaga a tela | gravação preta ou cortada | `caffeinate` amarrado ao gravador; Mac acordado com reunião chegando |
-| Gravador morre (disco, energia) | arquivo para de crescer calado | o app vê o processo morto e avisa com o fim do log |
-| Gravar em `.mp4` | corte abrupto corrompe | `.mkv`, legível mesmo cortado |
-| Começar sem driver, sem dispositivo, sem disco, sem permissão | descobre-se no fim | pré-voo que RECUSA com o motivo em palavras |
+| A sua voz escondendo a faixa do computador muda | a mistura parece boa, os outros sumiram | nada é misturado no disco: computador e microfone são faixas separadas, e o medidor, a conferência e o teste leem só a faixa do computador |
+| Mac dorme ou apaga a tela | gravação preta ou cortada | repouso e apagar da tela segurados durante a gravação; Mac acordado com reunião chegando |
+| O macOS para a captura (permissão tirada, tela sumiu) | arquivo para de crescer calado | o app vê o fluxo parar e diz o motivo |
+| O app ou o Mac cai no meio da gravação | um `.mp4` cortado não abre | `.mov` fragmentado, gravado em pedaços de 2 s: toca até o último, e na abertura seguinte o Ipsio fecha o arquivo e avisa |
+| Começar sem permissão, sem pasta, sem disco | descobre-se no fim | pré-voo que RECUSA com o motivo em palavras |
 | Reunião semanal na agenda | quem lê só o primeiro horário grava uma semana e perde as outras | lê a regra de repetição, as exceções, as remarcadas e as canceladas |
 
-Tamanho: ~1,8 GB por hora (H.264 por hardware, 12 fps, 4 Mbps).
+Tamanho: no máximo ~1,8 GB por hora (H.264 por hardware, 12 fps, 4 Mbps). Só
+entram os quadros em que a tela mudou, então um slide parado ocupa bem menos.
 
 ## Instalar
 
-Precisa de macOS 13 ou mais novo, [Homebrew](https://brew.sh) e as Command
-Line Tools (`xcode-select --install`). Na pasta do repositório:
+Precisa de macOS 13 ou mais novo e das Command Line Tools
+(`xcode-select --install`). Na pasta do repositório:
 
     bash install.sh
 
-Ele instala `ffmpeg`, `switchaudio-osx` e o driver `blackhole-2ch`, recarrega o
-áudio, cria por código o dispositivo de saída **`Ipsio`** (toca no seu
-alto-falante e manda o mesmo som ao BlackHole), cria um certificado local que
-mantém as permissões entre atualizações e liga o app de barra de menus, que
-volta sozinho a cada login. Pede a senha do Mac três vezes (driver, recarga do
-áudio, certificado). Recusa rodar com gravação em andamento.
+Ele cria um certificado local que mantém as permissões entre atualizações,
+compila o app de barra de menus e o liga; o app volta sozinho a cada login.
+Pede a senha do Mac uma vez (certificado). Recusa rodar com gravação em
+andamento, ou com uma gravação deixada aberta por uma queda (abra o Ipsio e
+ele a fecha).
 
 Depois, uma vez, a janela **Configurar o Ipsio** abre sozinha. Ela lista o que
 o Ipsio precisa, uma linha por item, verde ou vermelha, e cada linha vermelha
@@ -51,26 +52,21 @@ tem o botão que resolve:
 
 | Linha | O botão |
 |---|---|
-| ffmpeg, SwitchAudioSource, BlackHole | **Instalar**: abre o Terminal com o comando do Homebrew (o BlackHole pede a senha do Mac) |
-| Saída de som `Ipsio` | **Criar**: um clique, sem senha |
+| Pasta de configuração (`~/.ipsio`) | nenhum: o texto diz o que conferir |
 | Permissão de Gravação de Tela | **Abrir Ajustes**: ligue "Ipsio"; o app fecha e reabre sozinho |
-| Permissão de Microfone | **Permitir**. Vale até para aula: o BlackHole é uma entrada de áudio para o macOS |
-| Microfone do modo reunião | **Abrir Som**, para escolher o microfone de verdade |
+| Permissão de Microfone | **Permitir**. Obrigatória só no modo reunião ou com agenda conectada; o modo aula não grava microfone |
+| Microfone do modo reunião | **Abrir Som**, para conectar ou escolher um microfone |
 | Pasta das gravações, espaço em disco | **Escolher pasta** |
 | Agenda (opcional) | **Conectar** |
 
 A lista se confere de novo a cada poucos segundos: a linha fica verde assim que
 o item fica pronto, onde quer que tenha sido resolvido. Com tudo verde, ela
-oferece **Testar agora (20 s)**: grava, o Mac fala uma frase, mede, apaga e dá o
-veredito (no modo reunião confere também o microfone).
-
-Um passo só você faz: no Zoom, engrenagem, Áudio, Alto-falante = `Ipsio`; no
-Teams, Configurações, Dispositivos. O Meet no navegador segue a saída do
-sistema, que o Ipsio troca sozinho ao gravar.
+oferece **Testar agora (10 s)**: grava, o Mac fala uma frase, mede, apaga e dá
+o veredito (no modo reunião confere também o microfone). Nada a configurar no
+Zoom, no Teams ou no Meet.
 
 A janela volta a abrir sozinha sempre que falta algo obrigatório, e a qualquer
-hora pelo menu, **Conferir a instalação**. No Terminal: `ipsio doctor` (sai 0 só
-com tudo completo).
+hora pelo menu, **Conferir a instalação**.
 
 ## Usar
 
@@ -79,22 +75,28 @@ exclamação quando o som (ou o microfone) some por 90 s.
 
 - **Gravar agora / Parar e salvar.** Ao parar, o veredito da gravação inteira
   sai na hora: `som OK (média -20 dB, silêncio em 3% do tempo)`,
-  `GRAVAÇÃO SALVA, MAS MUDA` ou `GRAVAÇÃO SALVA, COM FALHAS DE SOM`. Gravação limpa vira notificação;
-  problema vira popup.
+  `GRAVAÇÃO SALVA, MAS MUDA` ou `GRAVAÇÃO SALVA, COM FALHAS DE SOM`. Gravação
+  limpa vira notificação; problema vira popup.
+- **Conferir o som até agora.** Lê o medidor ao vivo: o nível médio da
+  gravação até agora, e o pico, na hora (o arquivo não é decodificado).
 - **Modo.** *Aula*: só o som do computador. *Reunião*: som do computador +
-  o seu microfone (a entrada padrão do sistema, ou `MICROPHONE` na conf). O
-  arquivo da reunião tem três faixas de áudio: **1** mistura, **2** só o
-  computador (os outros), **3** só o microfone (você). As faixas separadas são
-  para a transcrição saber quem falou.
+  o seu microfone (a entrada padrão do sistema). O arquivo da reunião tem duas
+  faixas de áudio: **1** computador (os outros), **2** microfone (você). O
+  QuickTime toca as duas juntas; as faixas separadas são para a transcrição
+  saber quem falou.
 - **Próximas gravações.** O que a agenda vai gravar. Clicar numa reunião pula
   (ou despula) só ela; pular a que está gravando para na hora. Parar à mão uma
   gravação da agenda também conta como pular.
 - **Título, Pasta, Gravações recentes, Idioma (pt/en).** Arquivos em
-  `~/Movies/Ipsio/AAAA-MM-DD_HH-MM Título.mkv`.
+  `~/Movies/Ipsio/AAAA-MM-DD_HH-MM Título.mov`.
 
-Pelo Terminal, a mesma receita (o app só chama este script):
+A gravação mora dentro do app. Sair, encerrar a sessão e desligar o Mac param e
+salvam antes, e **Reiniciar o app** fica cinza durante a gravação. Se o app ou
+o Mac cair, os pedaços até os últimos 2 s ficam no disco, e na abertura
+seguinte o Ipsio fecha esse arquivo, grava o `.sha256` dele e avisa.
 
-    ipsio start | stop | level | check | status | test
+Pelo Terminal:
+
     ipsio-calendar            # o que a agenda gravaria agora
 
 ## Agenda: gravar sozinho
@@ -103,12 +105,12 @@ A cada 5 minutos o app lê as fontes configuradas. Cada reunião é gravada de
 2 minutos antes do início a 5 minutos depois do fim, no modo reunião. Duas
 reuniões seguidas viram dois arquivos: a primeira grava até o horário de
 fim dela, e então a segunda assume. Um convite que se sobrepõe à reunião em
-gravação nunca a corta; se terminar depois dela, assume nesse fim. Gravação começada à mão nunca é parada nem trocada pela agenda. Se a
-leitura falhar (rede, por exemplo), vale a última lida, e o menu diz desde
-quando. Depois de 2 horas sem uma leitura completa, a linha do menu vira aviso e
-uma notificação diz o motivo: reunião marcada depois disso não entraria. Com
-reunião nos próximos 15 minutos o Mac não entra em repouso por
-ociosidade.
+gravação nunca a corta; se terminar depois dela, assume nesse fim. Gravação
+começada à mão nunca é parada nem trocada pela agenda. Se a leitura falhar
+(rede, por exemplo), vale a última lida, e o menu diz desde quando. Depois de
+2 horas sem uma leitura completa, a linha do menu vira aviso e uma notificação
+diz o motivo: reunião marcada depois disso não entraria. Com reunião nos
+próximos 15 minutos o Mac não entra em repouso por ociosidade.
 
 Fontes (pode usar mais de uma; nenhuma credencial fica no código):
 
@@ -141,10 +143,8 @@ Mac e a agenda estiverem no mesmo fuso.
 | Chave | Padrão | O que é |
 |---|---|---|
 | `MODE` | `class` | `class` (aula) ou `meeting` (reunião) |
-| `MICROPHONE` | entrada padrão | nome exato do microfone no modo reunião |
 | `TITLE` | vazio | entra no nome das gravações feitas à mão |
-| `RECORDINGS_DIR` | `~/Movies/Ipsio` | onde ficam os `.mkv` |
-| `OUTPUT_DEVICE` | `Ipsio` | o dispositivo de saída múltipla |
+| `RECORDINGS_DIR` | `~/Movies/Ipsio` | onde ficam os `.mov` |
 | `MIN_FREE_GB` | `20` | abaixo disso, recusa começar |
 | `UI_LANGUAGE` | idioma do sistema | `pt` ou `en` |
 | `CALENDAR_AUTO` | `1` | `0` desliga a gravação automática (a lista continua no menu) |
@@ -154,7 +154,11 @@ Mac e a agenda estiverem no mesmo fuso.
 | `CALENDAR_LINK_ONLY` | `1` | `0` grava também evento do iCal sem link |
 | `CALENDAR_MACOS` | vazio | `1` lê o app Calendário do Mac (acima) |
 | `CALENDAR_COMMAND` | vazio | fonte por comando (acima) |
-| `POST_RECORDING` | vazio | comando rodado depois de cada gravação salva, com o `.mkv` em `$1` (veja abaixo) |
+| `POST_RECORDING` | vazio | comando rodado depois de cada gravação salva, com o `.mov` em `$1` (veja abaixo) |
+
+O microfone da reunião é a entrada padrão do sistema: escolha em Ajustes do
+Sistema, Som, Entrada. `CALENDAR_COMMAND` e `POST_RECORDING` só existem na
+versão compilada deste repositório; a edição da App Store não roda comandos.
 
 ### Depois de cada gravação
 
@@ -162,10 +166,10 @@ Toda gravação salva ganha, ao lado, um arquivo `.sha256` no formato que o
 `shasum -a 256 -c` confere: prova de que o arquivo não foi alterado depois.
 Em seguida, se houver `POST_RECORDING`, ele roda com o arquivo em `$1`; é por
 aqui que entram a transcrição ou a cópia para outro disco. Os dois rodam em
-segundo plano, com a saída em `~/.ipsio/post-recording.log` (com o código de
-saída); um comando que falha nunca mexe no vídeo, e parar a gravação nunca
-espera por eles. Cada gravação é entregue uma vez só (parar de novo não roda
-outra vez), e o trecho de 10 s do **Testar agora** nunca é.
+segundo plano, com a saída do comando em `~/.ipsio/post-recording.log` (com o
+código de saída); um comando que falha nunca mexe no vídeo, e parar a gravação
+nunca espera por eles. Cada gravação é entregue uma vez só (parar de novo não
+roda outra vez), e o trecho do **Testar agora** nunca é.
 
     POST_RECORDING='~/bin/transcrever.sh'
 
@@ -188,13 +192,31 @@ e ligue de novo.
   tela parada e som vazio.
 - Mac desligado, dormindo com a tampa fechada ou com a sessão bloqueada não
   grava (tela bloqueada grava a tela de bloqueio).
-- O volume das teclas pode não agir com a saída múltipla ativa; ajuste o
-  volume dentro do app de reunião.
+- Uma queda perde no máximo os últimos 2 s, mas o medidor morre junto com o
+  app: a gravação fechada na abertura seguinte é salva sem veredito de som.
 - A chave de assinatura que o `certificate.sh` cria fica no chaveiro do
   sistema, usável pelo `codesign` sem pergunta (é o que deixa a atualização
   reassinar sozinha). Um programa que já esteja rodando neste Mac poderia se
   assinar como Ipsio e herdar as permissões de Gravação de Tela e Microfone.
   Um certificado Developer ID, ou uma pergunta a cada assinatura, fecharia isso.
+
+## A edição da App Store
+
+O mesmo app, compilado pelo `build-store.sh` com `-D STORE`: em sandbox,
+universal (Apple silicon e Intel), macOS 13 ou mais novo. Não tem LaunchAgent
+(o item de menu **Abrir ao iniciar a sessão** pede ao macOS), nem
+`POST_RECORDING`, nem `CALENDAR_COMMAND`. É grátis por 7 dias, com tudo, e
+depois uma compra dentro do app libera para sempre; gravação em andamento
+sempre termina. A versão compilada deste repositório é sempre liberada.
+
+## A receita do Terminal (legado)
+
+O `ipsio.sh` é a receita antiga, mantida para uso no Terminal: grava pelo
+ffmpeg e pelo driver BlackHole em `.mkv`, e exige escolher o dispositivo de
+saída `Ipsio` como alto-falante dentro do Zoom ou do Teams. O app não o usa.
+Para montar: `bash install.sh --with-script` (exige Homebrew; pede a senha
+para o driver e para recarregar o áudio). Depois,
+`ipsio start | stop | level | check | status | test | doctor`.
 
 ## Depois
 
@@ -204,16 +226,22 @@ desenhadas em [`docs/DESIGN.md`](docs/DESIGN.md), ainda sem código.
 
 ## Desenvolver
 
-    bash tests/test-ipsio.sh      # o script, com dublês: roda no Linux e no Mac
+    bash tests/test-ipsio.sh      # o script legado, com dublês: roda no Linux e no Mac
     swiftc -parse-as-library app/Schedule.swift tests/ScheduleTests.swift -o /tmp/t && /tmp/t
-    bash tests/mutants.sh         # planta defeitos na agenda e exige que a bancada reprove cada um
+    swiftc -parse-as-library app/Setup.swift tests/SetupTests.swift -o /tmp/s && /tmp/s   # a lista da configuração
+    swiftc -parse-as-library app/Engine/*.swift tests/EngineTests.swift -o /tmp/e && /tmp/e   # motor nativo
+    swiftc -parse-as-library app/Engine/*.swift app/Setup.swift tests/BackendTests.swift -o /tmp/b && /tmp/b   # o backend do app
+    bash tests/mutants.sh         # planta defeitos na agenda e no motor; cada um tem que reprovar na sua bancada
+    bash build-store.sh           # a edição da App Store em dist/ (assinatura ad hoc; a da loja está no script)
 
-O CI (GitHub Actions) roda `bash -n`, `shellcheck`, as duas bancadas, os
-mutantes e a compilação do app num macOS de verdade.
+O CI (GitHub Actions) roda `bash -n`, `shellcheck`, as bancadas, os mutantes
+e a compilação do app num macOS de verdade.
 
-Toda regra de gravação mora em `ipsio.sh`; o app decide ícone e alarme pela
-linha de máquina `#state key=value` que fecha toda saída do script, nunca
-pelo texto, que muda com o idioma.
+Toda regra de gravação mora em `app/Engine/`. O `Backend.swift` responde no
+formato que o script sempre usou, e o app decide ícone e alarme pela linha de
+máquina `#state key=value` que fecha toda resposta, nunca pelo texto, que muda
+com o idioma. O `tools/NativeCLI.swift` compila o `ipsio-native`, o mesmo
+backend pelo Terminal.
 
 ## Licença
 

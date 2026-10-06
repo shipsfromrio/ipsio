@@ -76,7 +76,7 @@ A dry run by default: lists what it would do and how much it frees. With
 4. moves the `.mkv` to the Trash (never deletes directly): the user can still
    change their mind until the Trash is emptied.
 
-It never touches the recording in progress (the file in `~/.ipsio/file` with
+It never touches the recording in progress (the file in `~/.ipsio/recording` with
 the recorder alive), nor any file that does not follow Ipsio's name pattern.
 It can run by hand or from a daily LaunchAgent; the menu gains "Cleanup: frees
 X GB".

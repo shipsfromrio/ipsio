@@ -26,6 +26,7 @@
 import AppKit
 import AVFoundation
 import CoreGraphics
+import ServiceManagement
 import UserNotifications
 
 let agentLabel = "io.github.shipsfromrio.ipsio"   // LaunchAgent (install-app.sh)
@@ -74,6 +75,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     // A real "Quit": the LaunchAgent has KeepAlive, so ending the process only
     // reopens it; quitting means unloading the agent until the next login.
     let quitItem = NSMenuItem(title: "", action: #selector(doQuit), keyEquivalent: "q")
+    let loginItem = NSMenuItem(title: "", action: #selector(doLogin), keyEquivalent: "")   // store build only
+    let licenseItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")                // trial / ended
+    let buyItem = NSMenuItem(title: "", action: #selector(doBuy), keyEquivalent: "")
+    let restoreItem = NSMenuItem(title: "", action: #selector(doRestore), keyEquivalent: "")
     var confPath: String { dir + "/conf" }
     // Silence: the engine says silence=N (and mic_silence=N in meeting mode) on
     // the #state line; above this threshold the app raises the alarm. 90 s
@@ -112,13 +117,14 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         let pt: [String: String] = [
             "stopped": "Parado", "stopped_no_perm": "Parado · falta permissão de Gravação de Tela",
             "stopped_no_mic": "Parado · falta permissão de Microfone",
-            "record": "Gravar agora", "stop": "Parar e salvar", "check": "Conferir o arquivo inteiro",
-            "test": "Testar agora (20 s)", "testing": "Testando (20 s)…", "recent": "Gravações recentes",
+            "record": "Gravar agora", "stop": "Parar e salvar", "check": "Conferir o som até agora",
+            "test": "Testar agora (10 s)", "testing": "Testando (10 s)…", "recent": "Gravações recentes",
             "none": "(nenhuma ainda)", "open": "Abrir pasta das gravações", "title": "Título: %@…",
             "no_title": "(sem título)", "folder": "Pasta: %@…", "perm": "Permissões",
             "perm_screen": "Gravação de Tela…", "perm_mic": "Microfone…",
             "mode": "Modo: %@", "mode_class": "Aula (só o som do computador)", "mode_meeting": "Reunião (som do computador + seu microfone)",
             "mode_meeting_mic": "Reunião (som do computador + %@)", "class": "Aula", "meeting": "Reunião",
+            "login": "Abrir ao iniciar a sessão", "login_failed": "O macOS não aceitou o item de login",
             "language": "Switch to English  🇺🇸", "restart": "Reiniciar o app", "quit": "Sair (até o próximo login)",
             "waiting": "Aguardando a permissão de Gravação de Tela…",
             "recording": "GRAVANDO", "measuring": "medindo o som", "disk": "disco para %@ h",
@@ -171,14 +177,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "setup_intro": "O Ipsio precisa destes itens para gravar. Cada linha fica verde sozinha quando ficar pronta: pode resolver na ordem que quiser.",
             "setup_zoom": "Nada para mudar no Zoom, Teams ou Meet: o Ipsio grava o som que o Mac toca, no alto-falante que você já usa.",
             "setup_close": "Fechar", "setup_checking": "Conferindo…", "setup_missing": "falta",
-            "setup_ready": "Tudo pronto. Faça um teste de 20 s.", "setup_left_one": "Falta 1 item.", "setup_left": "Faltam %@ itens.",
+            "setup_ready": "Tudo pronto. Faça um teste de 10 s.", "setup_left_one": "Falta 1 item.", "setup_left": "Faltam %@ itens.",
             "setup_script": "O gravador respondeu", "setup_script_hint": "O gravador não respondeu à conferência. Reinicie o app.",
             "setup_dir": "Pasta de configuração", "setup_dir_hint": "Não consegui criar a pasta de configuração do Ipsio (~/.ipsio). Confira as permissões da sua pasta pessoal.",
-            "setup_ffmpeg": "ffmpeg, o gravador", "setup_ffmpeg_hint": "Instala pelo Homebrew, sem senha.",
-            "setup_switchaudio": "SwitchAudioSource, que troca a saída de som", "setup_switchaudio_hint": "Instala pelo Homebrew, sem senha.",
-            "setup_blackhole": "BlackHole, que capta o som do computador", "setup_blackhole_hint": "Instala pelo Homebrew e pede a senha do Mac. Se não aparecer depois, reinicie o Mac.",
-            "setup_device": "Saída de som \"%@\"", "setup_device_hint": "Toca no seu alto-falante e manda o mesmo som para o gravador. Um clique cria.",
-            "setup_screen": "Tela visível para o gravador", "setup_screen_hint": "O ffmpeg não encontrou a tela. Reinicie o Mac e confira de novo.",
             "setup_screen_permission": "Permissão de Gravação de Tela", "setup_screen_permission_hint": "Em Ajustes, ligue \"Ipsio\" na lista. O app fecha quando a permissão entrar e volta sozinho (se não voltar, abra o Ipsio de novo).",
             "setup_mic_permission": "Permissão de Microfone", "setup_mic_permission_hint": "A reunião grava a sua voz.",
             "setup_microphone": "Microfone do modo reunião", "setup_microphone_hint": "O Mac não tem entrada de som. Conecte um microfone, ou mude para o modo aula no menu.",
@@ -186,20 +187,20 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "setup_disk": "Espaço em disco", "setup_disk_hint": "Pouco espaço: uma hora de gravação ocupa cerca de 2 GB. Libere espaço ou escolha uma pasta em outro disco.",
             "setup_other": "Outro item", "setup_other_hint": "O gravador acusou um item que esta janela ainda não conhece. Atualize o Ipsio.",
             "setup_calendar": "Agenda (opcional)", "setup_calendar_hint": "Conecte a sua agenda para o Ipsio gravar as reuniões sozinho.",
-            "fix_install": "Instalar", "fix_create": "Criar", "fix_settings": "Abrir Ajustes", "fix_allow": "Permitir",
+            "fix_settings": "Abrir Ajustes", "fix_allow": "Permitir",
             "fix_sound": "Abrir Som", "fix_folder": "Escolher pasta", "fix_calendar": "Conectar",
-            "device_failed": "Não consegui criar a saída de som", "device_failed_body": "Rode o install.sh no Terminal, ou crie em Configuração de Áudio e MIDI um dispositivo de saída múltipla chamado \"%@\".",
         ]
         let en: [String: String] = [
             "stopped": "Stopped", "stopped_no_perm": "Stopped · Screen Recording permission missing",
             "stopped_no_mic": "Stopped · Microphone permission missing",
-            "record": "Record now", "stop": "Stop and save", "check": "Check the whole file",
-            "test": "Test now (20 s)", "testing": "Testing (20 s)…", "recent": "Recent recordings",
+            "record": "Record now", "stop": "Stop and save", "check": "Check the sound so far",
+            "test": "Test now (10 s)", "testing": "Testing (10 s)…", "recent": "Recent recordings",
             "none": "(none yet)", "open": "Open recordings folder", "title": "Title: %@…",
             "no_title": "(no title)", "folder": "Folder: %@…", "perm": "Permissions",
             "perm_screen": "Screen Recording…", "perm_mic": "Microphone…",
             "mode": "Mode: %@", "mode_class": "Class (computer sound only)", "mode_meeting": "Meeting (computer sound + your microphone)",
             "mode_meeting_mic": "Meeting (computer sound + %@)", "class": "Class", "meeting": "Meeting",
+            "login": "Open at login", "login_failed": "macOS refused the login item",
             "language": "Mudar para português  🇧🇷", "restart": "Restart the app", "quit": "Quit (until next login)",
             "waiting": "Waiting for the Screen Recording permission…",
             "recording": "RECORDING", "measuring": "measuring sound", "disk": "disk for %@ h",
@@ -252,14 +253,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "setup_intro": "Ipsio needs these to record. Each line turns green by itself once it is ready, so fix them in any order.",
             "setup_zoom": "Nothing to change in Zoom, Teams or Meet: Ipsio records the sound the Mac plays, on the speaker you already use.",
             "setup_close": "Close", "setup_checking": "Checking…", "setup_missing": "missing",
-            "setup_ready": "All set. Run a 20 s test.", "setup_left_one": "1 item left.", "setup_left": "%@ items left.",
+            "setup_ready": "All set. Run a 10 s test.", "setup_left_one": "1 item left.", "setup_left": "%@ items left.",
             "setup_script": "The recorder answered", "setup_script_hint": "The recorder did not answer the check. Restart the app.",
             "setup_dir": "Settings folder", "setup_dir_hint": "Could not create Ipsio's settings folder (~/.ipsio). Check the permissions of your home folder.",
-            "setup_ffmpeg": "ffmpeg, the recorder", "setup_ffmpeg_hint": "Installs through Homebrew, no password.",
-            "setup_switchaudio": "SwitchAudioSource, which switches the sound output", "setup_switchaudio_hint": "Installs through Homebrew, no password.",
-            "setup_blackhole": "BlackHole, which captures the computer sound", "setup_blackhole_hint": "Installs through Homebrew and asks for the Mac's password. If it does not show up afterwards, restart the Mac.",
-            "setup_device": "Sound output \"%@\"", "setup_device_hint": "Plays on your speaker and sends the same sound to the recorder. One click creates it.",
-            "setup_screen": "Screen visible to the recorder", "setup_screen_hint": "ffmpeg did not find the screen. Restart the Mac and check again.",
             "setup_screen_permission": "Screen Recording permission", "setup_screen_permission_hint": "In Settings, turn on \"Ipsio\" in the list. The app closes once the permission is in and comes back by itself (if it does not, open Ipsio again).",
             "setup_mic_permission": "Microphone permission", "setup_mic_permission_hint": "Meetings record your voice.",
             "setup_microphone": "Microphone for meeting mode", "setup_microphone_hint": "The Mac has no sound input. Connect a microphone, or switch to class mode in the menu.",
@@ -267,9 +263,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "setup_disk": "Disk space", "setup_disk_hint": "Low on space: an hour of recording takes about 2 GB. Free some space or pick a folder on another disk.",
             "setup_other": "Another item", "setup_other_hint": "The recorder reported an item this window does not know yet. Update Ipsio.",
             "setup_calendar": "Calendar (optional)", "setup_calendar_hint": "Connect your calendar so Ipsio records meetings by itself.",
-            "fix_install": "Install", "fix_create": "Create", "fix_settings": "Open Settings", "fix_allow": "Allow",
+            "fix_settings": "Open Settings", "fix_allow": "Allow",
             "fix_sound": "Open Sound", "fix_folder": "Choose folder", "fix_calendar": "Connect",
-            "device_failed": "Could not create the sound output", "device_failed_body": "Run install.sh in Terminal, or create a multi-output device named \"%@\" in Audio MIDI Setup.",
         ]
         return (lang == "pt" ? pt : en)[k] ?? k
     }
@@ -314,7 +309,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         // Without this NSMenu re-enables every item that has an action by
         // itself, and "Record" stayed clickable during a recording.
         for m in [menu, recentMenu, upcomingMenu, modeMenu, permMenu] { m.autoenablesItems = false }
-        for m in [recordItem, stopItem, checkItem, testItem, modeClass, modeMeeting, titleItem, folderItem, openItem, permScreen, permMic, doctorItem, connectItem, languageItem, restartItem, quitItem] { m.target = self }
+        for m in [recordItem, stopItem, checkItem, testItem, modeClass, modeMeeting, titleItem, folderItem, openItem, permScreen, permMic, doctorItem, connectItem, languageItem, restartItem, quitItem, loginItem, buyItem, restoreItem] { m.target = self }
+        licenseItem.isEnabled = false
         statusItem.isEnabled = false; calendarStatus.isEnabled = false
         menu.addItem(statusItem); menu.addItem(calendarStatus); menu.addItem(.separator())
         menu.addItem(recordItem); menu.addItem(stopItem); menu.addItem(checkItem); menu.addItem(testItem); menu.addItem(.separator())
@@ -324,7 +320,12 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         menu.addItem(openItem); menu.addItem(titleItem); menu.addItem(folderItem)
         permMenu.addItem(permScreen); permMenu.addItem(permMic); permItem.submenu = permMenu; menu.addItem(permItem)
         menu.addItem(connectItem); menu.addItem(doctorItem)
-        menu.addItem(.separator()); menu.addItem(languageItem); menu.addItem(restartItem); menu.addItem(quitItem)
+        menu.addItem(.separator()); menu.addItem(licenseItem); menu.addItem(buyItem); menu.addItem(restoreItem)
+        menu.addItem(languageItem)
+        #if STORE
+        menu.addItem(loginItem)
+        #endif
+        menu.addItem(restartItem); menu.addItem(quitItem)
         menu.delegate = self
         item.menu = menu
         // The notification center throws (and kills the app) outside an .app
@@ -335,6 +336,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             center.requestAuthorization(options: [.alert, .sound]) { ok, _ in DispatchQueue.main.async { self.notificationsOk = ok } }
         }
         MacCalendar.install()
+        restoreFolderAccess()
+        startLicense()
         skipped = Set(((try? String(contentsOfFile: skipPath, encoding: .utf8)) ?? "").components(separatedBy: "\n").filter { !$0.isEmpty })
         meetings = Sources(dir: dir, conf: readConf()).readCache()
         refresh()
@@ -346,8 +349,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         RunLoop.main.add(t2, forMode: .common); calendarTimer = t2
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in self.readCalendar() }
         readCalendar()
-        // Microphone first (one "Allow" on the spot), screen after (Settings pane).
-        if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+        // Microphone first (one "Allow" on the spot), screen after (Settings
+        // pane). Only when something records a voice: meeting mode or a calendar.
+        let voice = mode == "meeting" || !Sources(dir: dir, conf: readConf()).configured.isEmpty
+        if voice && AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
             AVCaptureDevice.requestAccess(for: .audio) { _ in DispatchQueue.main.async { self.refresh() } }
         }
         if !CGPreflightScreenCaptureAccess() { askScreenPermission() }
@@ -552,6 +557,18 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         languageItem.title = t("language"); restartItem.title = t("restart"); quitItem.title = t("quit")
         // The recording lives in this process now: restarting would cut it.
         restartItem.isEnabled = !on && !busy
+        loginItem.title = t("login"); loginItem.state = loginOn ? .on : .off
+        let lic = license()
+        for m in [licenseItem, buyItem, restoreItem] { m.isHidden = !License.offersPurchase(lic) }
+        switch lic {
+        case .trial(let d): licenseItem.title = LicenseTexts.t(d == 1 ? "menu_trial_one" : "menu_trial", [String(d)], lang: lang)
+        case .expired:
+            licenseItem.title = LicenseTexts.t("menu_expired", lang: lang)
+            if !on { statusItem.title = LicenseTexts.title("expired", lang: lang) }
+        default: break
+        }
+        buyItem.title = LicenseTexts.t("menu_buy", [price ?? "US$ 19.99"], lang: lang)
+        restoreItem.title = LicenseTexts.t("menu_restore", lang: lang)
         let c = readConf()
         let title = c["TITLE"] ?? ""
         titleItem.title = t("title", title.isEmpty ? t("no_title") : title)
@@ -765,6 +782,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     }
 
     func startCalendar(_ e: Meeting) {
+        if !licenseAllows(explain: !failureAlerted.contains(e.id)) {
+            calendarFailure[e.id] = Date(); failureAlerted.insert(e.id); return
+        }
         if !permissionsOk(explain: !failureAlerted.contains(e.id), meeting: readConf()["CALENDAR_MODE"] != "class") {
             calendarFailure[e.id] = Date(); failureAlerted.insert(e.id); return
         }
@@ -820,6 +840,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
 
     // ---- actions ----
     @objc func doRecord() {
+        guard licenseAllows(explain: true) else { refresh(); return }
         guard permissionsOk(explain: true, meeting: mode == "meeting") else { refresh(); return }
         alarmGiven = false; micAlarmGiven = false
         busy = true; refresh()
@@ -863,6 +884,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         // A second click (or Return in the setup window) during a test would
         // finish fast with ALREADY_RECORDING and clear busy under the first one.
         guard !busy else { return }
+        guard licenseAllows(explain: true) else { refresh(); return }
         guard permissionsOk(explain: true, meeting: mode == "meeting") else { refresh(); return }
         busy = true; refresh()
         statusItem.title = t("testing")
@@ -919,7 +941,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         p.prompt = t("use_folder"); p.message = t("where")
         p.directoryURL = URL(fileURLWithPath: run("folder").trimmingCharacters(in: .whitespacesAndNewlines))
         if p.runModal() == .OK, let u = p.url {
-            var c = readConf(); c["RECORDINGS_DIR"] = u.path; writeConf(c); refresh()
+            var c = readConf(); c["RECORDINGS_DIR"] = u.path; writeConf(c); saveFolderAccess(u); refresh()
         }
     }
     @objc func doDoctor() { setup.show() }
@@ -935,7 +957,6 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         return w
     }()
     var setupDonePath: String { dir + "/setup-done" }
-    func deviceName() -> String { let d = readConf()["OUTPUT_DEVICE"] ?? ""; return d.isEmpty ? "Ipsio" : d }
 
     /// At launch: the window opens on the first run, and on any later launch
     /// where something required is missing (a driver removed, a permission
@@ -953,8 +974,6 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
 
     static func fixLabel(_ f: SetupFix) -> String {
         switch f {
-        case .terminal: return "fix_install"
-        case .createDevice: return "fix_create"
         case .screenSettings: return "fix_settings"
         case .micPermission: return "fix_allow"
         case .soundInput: return "fix_sound"
@@ -966,27 +985,6 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
 
     func applyFix(_ f: SetupFix) {
         switch f {
-        case .terminal(let cmd):
-            // A .command file opens in Terminal with no Automation permission
-            // (osascript to Terminal would ask for one more).
-            // A failed write must not open a previous fix.command (another command).
-            let path = dir + "/fix.command"
-            try? FileManager.default.removeItem(atPath: path)
-            guard (try? Setup.terminalScript(cmd).write(toFile: path, atomically: true, encoding: .utf8)) != nil else {
-                alert(t("setup_title"), path); return
-            }
-            chmod(path, 0o700)
-            NSWorkspace.shared.open(URL(fileURLWithPath: path))
-        case .createDevice:
-            let name = deviceName()
-            let tool = Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("create-device").path ?? ""
-            guard FileManager.default.isExecutableFile(atPath: tool) else { alert(t("device_failed"), t("device_failed_body", name)); return }
-            DispatchQueue.global().async {
-                let p = Process(); p.executableURL = URL(fileURLWithPath: tool); p.arguments = [name]
-                p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
-                let ok = (try? p.run()) != nil && { p.waitUntilExit(); return p.terminationStatus == 0 }()
-                if !ok { self.alert(self.t("device_failed"), self.t("device_failed_body", name)) }
-            }
         case .screenSettings: CGRequestScreenCaptureAccess(); doScreenPermission()
         case .micPermission: doMicPermission()
         case .soundInput:
@@ -1065,17 +1063,109 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         var c = readConf(); c["UI_LANGUAGE"] = lang == "pt" ? "en" : "pt"; writeConf(c); refresh()
     }
     @objc func doRestart() { NSApp.terminate(nil) }
+
+    // ---- store build: login item and the recordings folder ----
+    // The GPL build opens at login through its LaunchAgent (install-app.sh);
+    // the store build asks macOS (SMAppService), only when the person ticks it.
+    var loginOn: Bool { SMAppService.mainApp.status == .enabled }
+    @objc func doLogin() {
+        do { if loginOn { try SMAppService.mainApp.unregister() } else { try SMAppService.mainApp.register() } }
+        catch { alert(t("login_failed"), "\(error)") }
+        refresh()
+    }
+    /// A sandboxed app reaches a folder the person picked only through a
+    /// security-scoped bookmark, kept in the conf and reopened at launch.
+    /// ~/Movies (the default) needs none: the entitlement covers it.
+    func saveFolderAccess(_ u: URL) {
+        #if STORE
+        var c = readConf()
+        if let d = try? u.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) {
+            c["RECORDINGS_BOOKMARK"] = d.base64EncodedString()
+        } else { c["RECORDINGS_BOOKMARK"] = nil }
+        writeConf(c)
+        _ = u.startAccessingSecurityScopedResource()
+        #endif
+    }
+    func restoreFolderAccess() {
+        #if STORE
+        guard let b = readConf()["RECORDINGS_BOOKMARK"], let d = Data(base64Encoded: b) else { return }
+        var stale = false
+        guard let u = try? URL(resolvingBookmarkData: d, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &stale) else { return }
+        _ = u.startAccessingSecurityScopedResource()
+        if stale { saveFolderAccess(u) }
+        #endif
+    }
     /// Quit, logout or shutdown mid-recording: close the file and write its
     /// .sha256 before going (without this, it would only be found on the next launch).
     func applicationWillTerminate(_ n: Notification) {
         if recording() { _ = run("stop") }
     }
     @objc func doQuit() {
+        #if !STORE
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         p.arguments = ["bootout", "gui/\(getuid())/\(agentLabel)"]
         try? p.run()          // bootout kills this process; nothing to do after
-        NSApp.terminate(nil)  // if the agent does not exist (app opened by hand), quit normally
+        #endif
+        NSApp.terminate(nil)  // the store build has no agent; nor an app opened by hand
+    }
+
+    // ---- license: the store build has a 7-day trial, then one lifetime
+    // purchase (app/Store). The GPL build is always unlocked. Only NEW
+    // recordings are refused: a recording in progress always finishes.
+    var purchases: Purchases?
+    var purchased = License.currentBuild == .gpl
+    var price: String?
+    var licenseCache: (at: Date, state: LicenseState)?
+    lazy var licenseRecord = LicenseRecord(file: URL(fileURLWithPath: dir + "/license"), defaults: UserDefaults.standard)
+    /// Read at most once a minute (refresh runs every 3 s).
+    func license(fresh: Bool = false) -> LicenseState {
+        if !fresh, let c = licenseCache, Date().timeIntervalSince(c.at) < 60 { return c.state }
+        let s = licenseRecord.state(now: Date(), purchased: purchased, build: License.currentBuild)
+        licenseCache = (Date(), s); return s
+    }
+    func licenseAllows(explain: Bool) -> Bool {
+        if License.canStartRecording(license(fresh: true)) { return true }
+        if explain { alert(LicenseTexts.title("expired", lang: lang), LicenseTexts.body("expired", lang: lang)) }
+        return false
+    }
+    func setPurchased(_ ok: Bool) {
+        purchased = ok || License.currentBuild == .gpl
+        licenseCache = nil; refresh()
+    }
+    func startLicense() {
+        MainActor.assumeIsolated {
+            let p = Purchases(); purchases = p
+            p.onChange = { [weak self] ok in self?.setPurchased(ok) }
+            Task { @MainActor in
+                let ok = await p.refresh()
+                self.price = await p.displayPrice()
+                self.setPurchased(ok)
+            }
+        }
+    }
+    @objc func doBuy() {
+        guard let p = purchases else { return }
+        Task { @MainActor in
+            switch await p.buy() {
+            case .success(true):
+                self.setPurchased(true)
+                self.alert(LicenseTexts.title("purchased", lang: self.lang), LicenseTexts.body("purchased", lang: self.lang))
+            case .success(false):
+                if p.lastBuyPending { self.alert(LicenseTexts.title("purchase_pending", lang: self.lang), LicenseTexts.body("purchase_pending", lang: self.lang)) }
+            case .failure(let e):
+                self.alert(LicenseTexts.title("purchase_failed", lang: self.lang), LicenseTexts.body("purchase_failed", [e.localizedDescription], lang: self.lang))
+            }
+        }
+    }
+    @objc func doRestore() {
+        guard let p = purchases else { return }
+        Task { @MainActor in
+            let ok = await p.restore()
+            self.setPurchased(ok)
+            let k = ok ? "purchased" : "restore_none"
+            self.alert(LicenseTexts.title(k, lang: self.lang), LicenseTexts.body(k, lang: self.lang))
+        }
     }
     @objc func doScreenPermission() {
         CGRequestScreenCaptureAccess()
