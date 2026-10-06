@@ -131,6 +131,7 @@ transcribe_mutant Transcript.swift "the echo is kept" 'return !others.contains {
 transcribe_mutant Transcript.swift "echo ignores time" 'guard o.start - slack <= m.end && m.start <= o.end + slack else { return false }' ''
 transcribe_mutant Transcript.swift "one shared word makes an echo" '/ Double(mine.count) >= share' '> 0'
 transcribe_mutant Transcript.swift "the others can be dropped as echo" 'guard m.speaker == .me else { return true }' ''
+transcribe_mutant Transcript.swift "accents make the echo a new line" 'let f = s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).lowercased()' 'let f = s.lowercased()'
 transcribe_mutant Export.swift "a transcript may overwrite the evidence" 'if kinds.contains(ext) || ext == "sha256" { throw Failure.refused(media) }' ''
 # One file of app/ against its own bench (with Files.swift for the evidence hash):
 # meeting detection, search, the consent reminder and the integrity report.
@@ -245,6 +246,8 @@ helper_mutant $H "wrong side attribution (me read as others)" 'case "me", "eu", 
 helper_mutant $H "the brain's side wins over the track" 'let side = heardSide(of: c.text) ?? c.side' 'let side = c.side'
 helper_mutant $H "the user's words count as the others' turn" 'if who == .others { othersWords +=' 'if who == .me || who == .others { othersWords +='
 helper_mutant $H "the microphone echo is kept" 'if Echo.isEcho(' 'if false && Echo.isEcho('
+helper_mutant $H "the live echo ignores time" 'abs(me.t - o.t) <= within' 'true'
+helper_mutant $H "a short reply is judged an echo" 'static let within = 6.0, minWords = 3' 'static let within = 6.0, minWords = 1'
 helper_mutant $H "the window never compacts" 'now - f.t > HelperState.windowSeconds' 'now - f.t > HelperState.windowSeconds * 1000'
 helper_mutant $H "key kept in the conf" 'c.filter { k, v in !k.hasPrefix("HELPER_") || redact(v, key: key) == v }' 'c.filter { _, _ in true }'
 helper_mutant $H "key pattern not hidden" 'while let r = out.range(of: "sk-ant-' 'while false, let r = out.range(of: "sk-ant-'

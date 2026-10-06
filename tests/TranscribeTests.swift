@@ -170,6 +170,9 @@ struct TranscribeTests {
         check(Transcript.dropEcho([echo]) == [echo], "with no others' line nothing is dropped")
         let othersOnly = Segment(start: 4.2, end: 8.1, speaker: .others, text: echo.text)
         check(Transcript.dropEcho([heard, othersOnly]).count == 2, "two others' lines are both kept")
+        let accented = Segment(start: 20, end: 23, speaker: .others, text: "Já está pronto o orçamento?")
+        let flat = Segment(start: 20.3, end: 23.2, speaker: .me, text: "ja esta pronto o orcamento")
+        check(!Transcript.dropEcho([accented, flat]).contains(flat), "the echo is caught when one track drops the accents")
 
         print("\n\(total - fails)/\(total) ok")
         exit(fails == 0 ? 0 : 1)

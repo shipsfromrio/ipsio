@@ -85,11 +85,7 @@ struct Cadence: Equatable {
 
 enum HelperText {
     /// Lowercased, accents folded, letters and digits only, single spaces.
-    static func norm(_ s: String) -> String {
-        let f = s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).lowercased()
-        let mapped = f.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) ? Character($0) : " " }
-        return String(mapped).split(separator: " ").joined(separator: " ")
-    }
+    static func norm(_ s: String) -> String { Echo.words(s).joined(separator: " ") }
     static func words(_ s: String) -> Int { s.split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" }).count }
     /// One line, trimmed, at most `max` characters.
     static func clip(_ s: String, _ max: Int) -> String {
@@ -104,20 +100,18 @@ enum HelperText {
 
 // ---- the microphone hears the speakers ----
 
-enum Echo {
-    static let within = 6.0, overlap = 0.6, minWords = 3
+extension Echo {
+    /// Live, a line has one time (when it was heard), not a span: the others'
+    /// line counts within `within` seconds. A line under `minWords` words
+    /// ("sim", "ok") is the user's: a short reply repeats the others by chance.
+    static let within = 6.0, minWords = 3
     /// A line on Me that repeats what Others said a moment ago is the
     /// loudspeaker in the microphone, not the user: dropped.
     static func isEcho(_ me: HeardLine, recentOthers: [HeardLine]) -> Bool {
         guard me.speaker == .me else { return false }
-        let mine = HelperText.norm(me.text).split(separator: " ").map(String.init)
-        guard mine.count >= minWords else { return false }
-        for o in recentOthers where o.speaker == .others && abs(me.t - o.t) <= within {
-            let theirs = Set(HelperText.norm(o.text).split(separator: " ").map(String.init))
-            let shared = mine.filter { theirs.contains($0) }.count
-            if Double(shared) / Double(mine.count) >= overlap { return true }
+        return recentOthers.contains { o in
+            o.speaker == .others && abs(me.t - o.t) <= within && repeats(me.text, in: o.text, minWords: minWords)
         }
-        return false
     }
 }
 

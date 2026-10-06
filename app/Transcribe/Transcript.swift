@@ -179,22 +179,40 @@ enum Transcript {
     /// Without headphones the microphone hears the speakers, and the others'
     /// words came out twice, once as "Me" (measured on a real Mac). A "Me"
     /// line is that echo when it overlaps an "Others" line in time and most
-    /// of its words are in it. "Others" is never dropped.
-    static func dropEcho(_ segs: [Segment], slack: Double = 1.0, share: Double = 0.6) -> [Segment] {
+    /// of its words are in it (`Echo.repeats`). "Others" is never dropped.
+    static func dropEcho(_ segs: [Segment], slack: Double = 1.0, share: Double = Echo.share) -> [Segment] {
         let others = segs.filter { $0.speaker == .others }
-        func words(_ s: String) -> [String] {
-            s.lowercased().components(separatedBy: .whitespaces).map(Overlap.norm).filter { !$0.isEmpty }
-        }
         return segs.filter { m in
             guard m.speaker == .me else { return true }
-            let mine = words(m.text)
-            guard !mine.isEmpty else { return true }
             return !others.contains { o in
                 guard o.start - slack <= m.end && m.start <= o.end + slack else { return false }
-                let theirs = Set(words(o.text))
-                return Double(mine.filter { theirs.contains($0) }.count) / Double(mine.count) >= share
+                return Echo.repeats(m.text, in: o.text, share: share)
             }
         }
+    }
+}
+
+/// The one echo rule, for the finished transcript (`Transcript.dropEcho`) and
+/// for helper mode's live lines (`Echo.isEcho`): a line on "Me" is the
+/// loudspeaker in the microphone when most of its words are in a line the
+/// others said at the same moment. Each caller says what "the same moment" is.
+enum Echo {
+    static let share = 0.6
+
+    /// Lowercased, accents folded, letters and digits only.
+    static func words(_ s: String) -> [String] {
+        let f = s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).lowercased()
+        let mapped = f.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) ? Character($0) : " " }
+        return String(mapped).split(separator: " ").map(String.init)
+    }
+
+    /// At least `share` of the words of `mine` are in `theirs`; a line shorter
+    /// than `minWords` words is never an echo.
+    static func repeats(_ mine: String, in theirs: String, share: Double = Echo.share, minWords: Int = 1) -> Bool {
+        let mine = words(mine)
+        guard mine.count >= max(1, minWords) else { return false }
+        let theirs = Set(words(theirs))
+        return Double(mine.filter { theirs.contains($0) }.count) / Double(mine.count) >= share
     }
 }
 
