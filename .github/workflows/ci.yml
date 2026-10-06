@@ -37,5 +37,10 @@ jobs:
         run: |
           swiftc -parse-as-library app/Setup.swift tests/SetupTests.swift -o "$RUNNER_TEMP/setup-tests"
           "$RUNNER_TEMP/setup-tests"
-      - name: mutants (the bench fails a broken calendar)
+      - name: native engine bench
+        run: |
+          swiftc -parse-as-library app/Engine/*.swift tests/EngineTests.swift -o "$RUNNER_TEMP/engine-tests"
+          "$RUNNER_TEMP/engine-tests"
+          swiftc -O -parse-as-library app/Engine/*.swift tools/RecCLI.swift -o "$RUNNER_TEMP/ipsio-rec"
+      - name: mutants (the benches fail a broken calendar and a broken engine)
         run: bash tests/mutants.sh

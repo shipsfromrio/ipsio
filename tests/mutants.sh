@@ -45,6 +45,31 @@ mutant "the meeting recording is cut by an overlap" 'if now < cur.end { return c
 mutant "a covered invite starts after the call" '$0.id != c && $0.end > cur.end' '$0.id != c'
 mutant "a removed calendar records from the cache" '.filter { c.contains($0.source) }' ''
 mutant "the runner ignores its deadline" 'g.wait(timeout: .now() + limit)' 'g.wait(timeout: .now() + limit * 100)'
+# The native engine: the same idea, one file of app/Engine at a time, against
+# tests/EngineTests.swift.
+engine_mutant() { # <file in app/Engine> <name> <original text> <broken text>
+  rm -rf "$T/Engine"; cp -R "$ROOT/app/Engine" "$T/Engine"
+  python3 - "$ROOT/app/Engine/$1" "$T/Engine/$1" "$3" "$4" <<'PY' || { echo "ERROR: the snippet for mutant '$2' is no longer in $1"; ALIVE=$((ALIVE+1)); return; }
+import sys
+src, dst, a, b = sys.argv[1:5]
+s = open(src, encoding="utf-8").read()
+if a not in s: sys.exit(1)
+open(dst, "w", encoding="utf-8").write(s.replace(a, b, 1))
+PY
+  if ! swiftc -parse-as-library "$T"/Engine/*.swift "$ROOT/tests/EngineTests.swift" -o "$T/e" 2>"$T/err"; then
+    echo "ERROR: mutant '$2' does not compile"; tail -3 "$T/err"; ALIVE=$((ALIVE+1)); return; fi
+  if "$T/e" >/dev/null 2>&1; then echo "SURVIVED: $2"; ALIVE=$((ALIVE+1)); else echo "killed: $2"; fi
+}
+engine_mutant Sound.swift "silence threshold off" 'x >= silenceDB else' 'x >= silenceDB - 10 else'
+engine_mutant Sound.swift "a frozen meter reads as the last value" 'if age > Sound.staleSeconds {' 'if age > Sound.staleSeconds * 100 {'
+engine_mutant Sound.swift "gaps from 50% instead of 40%" 'if pct >= 40 { return (.gaps' 'if pct >= 50 { return (.gaps'
+engine_mutant Sound.swift "dead microphone never dead" '(pct >= 90 ? .dead : .ok' '(pct >= 101 ? .dead : .ok'
+engine_mutant Sound.swift "no 10 s window" 'if window.count > 10 { window.removeFirst() }' 'if window.count > 1 { window.removeFirst() }'
+engine_mutant Sound.swift "a gap skips seconds" 'while s > second { close(at: startedAt! + Double(second + 1)) }' 'if s > second { second = s - 1; close(at: startedAt! + Double(second + 1)) }'
+engine_mutant Files.swift "evidence stops at the first block" 'hasher.update(data: d)' 'hasher.update(data: d); break'
+engine_mutant Files.swift "collision overwrites" 'while exists(out) {' 'while false && exists(out) {'
+engine_mutant Writer.swift "no fragments: a crash loses the file" 'writer.movieFragmentInterval = CMTime(seconds: s.fragment, preferredTimescale: 600)' ''
+engine_mutant Writer.swift "the microphone track is never added" 'micIn = s.microphone ? AVAssetWriterInput' 'micIn = false ? AVAssetWriterInput'
 echo
 [ "$ALIVE" -eq 0 ] && echo "all mutants killed" || echo "$ALIVE mutant(s) alive"
 [ "$ALIVE" -eq 0 ]

@@ -208,7 +208,8 @@ in [`docs/DESIGN.md`](docs/DESIGN.md), with no code yet.
 
     bash tests/test-ipsio.sh      # the script, with test doubles: runs on Linux and macOS
     swiftc -parse-as-library app/Schedule.swift tests/ScheduleTests.swift -o /tmp/t && /tmp/t
-    bash tests/mutants.sh         # plants defects in the calendar and requires the bench to fail each one
+    swiftc -parse-as-library app/Engine/*.swift tests/EngineTests.swift -o /tmp/e && /tmp/e   # native engine
+    bash tests/mutants.sh         # plants defects in the calendar and the engine; each must fail its bench
 
 CI (GitHub Actions) runs `bash -n`, `shellcheck`, both benches, the mutants
 and the app build on a real macOS runner.

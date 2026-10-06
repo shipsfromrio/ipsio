@@ -109,3 +109,20 @@ microphone into a fragmented `.mov`, with the same settings as `ipsio.sh`
 
 Gate passed on CPU, memory and crash survival. Still to measure: alignment
 over a 2 h recording, and a run on macOS 13.
+
+### Engine, phase 1 (05/10/2026)
+
+`app/Engine/`: `Sound.swift` (the script's thresholds and summaries, and a
+live meter with a rolling 10 s window), `Files.swift` (names and the
+`.sha256`), `Writer.swift` (fragmented `.mov`, computer and microphone in
+separate tracks), `Recorder.swift` (ScreenCaptureKit; microphone in the
+stream on macOS 15+, AVCaptureSession on 13 and 14; idempotent stop).
+`tools/RecCLI.swift` builds `ipsio-rec`, the engine from Terminal.
+
+Bench `tests/EngineTests.swift` (44 checks, synthetic frames and a sine
+wave, plus a child process that dies mid-file) and 10 engine mutants in
+`tests/mutants.sh`. On the Mac: 30 s meeting (computer -21 dB, microphone
+-30 dB, 0 dropped), 15 s class (`shasum -c` OK), 25 s of silence (the level
+said NO_SOUND from the 4th second; the summary said SILENT 100%).
+
+Next: the app calls the engine instead of `ipsio.sh` (phase 2).
