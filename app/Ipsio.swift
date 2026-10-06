@@ -68,6 +68,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     let doctorItem = NSMenuItem(title: "", action: #selector(doDoctor), keyEquivalent: "")
     let connectItem = NSMenuItem(title: "", action: #selector(doConnectCalendar), keyEquivalent: "")
     let languageItem = NSMenuItem(title: "", action: #selector(doLanguage), keyEquivalent: "")
+    let hotKeysItem = NSMenuItem(title: "", action: #selector(doHotKeys), keyEquivalent: "")
     // Our own action, not the system's terminate:: on macOS 26 the standard quit
     // action gets an automatic icon, which opens an icon column and indents the
     // whole menu.
@@ -128,6 +129,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "transcribing": "Transcrevendo…", "open_transcript": "Abrir a transcrição",
             "transcribe_auto": "Transcrever cada gravação ao parar", "transcribed_title": "Transcrição pronta",
             "transcribe_failed": "A transcrição não foi feita",
+            "hotkeys": "Atalhos ⌃⌥⌘R (gravar/parar) e ⌃⌥⌘T (testar)",
             "login": "Abrir ao iniciar a sessão", "login_failed": "O macOS não aceitou o item de login",
             "language": "Switch to English  🇺🇸", "restart": "Reiniciar o app", "quit": "Sair (até o próximo login)",
             "waiting": "Aguardando a permissão de Gravação de Tela…",
@@ -208,6 +210,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "transcribing": "Transcribing…", "open_transcript": "Open the transcript",
             "transcribe_auto": "Transcribe each recording on stop", "transcribed_title": "Transcript ready",
             "transcribe_failed": "The transcription was not made",
+            "hotkeys": "Shortcuts ⌃⌥⌘R (record/stop) and ⌃⌥⌘T (test)",
             "login": "Open at login", "login_failed": "macOS refused the login item",
             "language": "Mudar para português  🇧🇷", "restart": "Restart the app", "quit": "Quit (until next login)",
             "waiting": "Waiting for the Screen Recording permission…",
@@ -317,7 +320,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         // Without this NSMenu re-enables every item that has an action by
         // itself, and "Record" stayed clickable during a recording.
         for m in [menu, recentMenu, upcomingMenu, modeMenu, permMenu] { m.autoenablesItems = false }
-        for m in [recordItem, stopItem, checkItem, testItem, modeClass, modeMeeting, titleItem, folderItem, openItem, permScreen, permMic, doctorItem, connectItem, languageItem, restartItem, quitItem, loginItem, buyItem, restoreItem] { m.target = self }
+        for m in [recordItem, stopItem, checkItem, testItem, modeClass, modeMeeting, titleItem, folderItem, openItem, permScreen, permMic, doctorItem, connectItem, languageItem, hotKeysItem, restartItem, quitItem, loginItem, buyItem, restoreItem] { m.target = self }
         licenseItem.isEnabled = false
         statusItem.isEnabled = false; calendarStatus.isEnabled = false
         menu.addItem(statusItem); menu.addItem(calendarStatus); menu.addItem(.separator())
@@ -329,7 +332,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         permMenu.addItem(permScreen); permMenu.addItem(permMic); permItem.submenu = permMenu; menu.addItem(permItem)
         menu.addItem(connectItem); menu.addItem(doctorItem)
         menu.addItem(.separator()); menu.addItem(licenseItem); menu.addItem(buyItem); menu.addItem(restoreItem)
-        menu.addItem(languageItem)
+        menu.addItem(languageItem); menu.addItem(hotKeysItem)
         #if STORE
         menu.addItem(loginItem)
         #endif
@@ -365,6 +368,31 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         }
         if !CGPreflightScreenCaptureAccess() { askScreenPermission() }
         openSetupIfNeeded()
+        startHotKeys()
+    }
+
+    // ---- global shortcuts (app/HotKey.swift) ----
+    var hotKeys: HotKeys?
+    func startHotKeys() {
+        hotKeys?.stop(); hotKeys = nil
+        let on = HotKeys.enabled(readConf()["HOTKEYS"])
+        // The letters show in the menu; they act only through the global hot key.
+        for (it, a) in [(recordItem, HotKeys.Action.record), (testItem, .test)] {
+            it.keyEquivalent = on ? (HotKeys.combos[a]?.letter ?? "") : ""
+            it.keyEquivalentModifierMask = [.control, .option, .command]
+        }
+        stopItem.keyEquivalent = ""
+        guard on else { return }
+        let k = HotKeys { a in
+            switch a {
+            case .record: if self.stopItem.isEnabled { self.doStop() } else if self.recordItem.isEnabled { self.doRecord() }
+            case .test: if self.testItem.isEnabled { self.doTest() }
+            }
+        }
+        k.start(); hotKeys = k
+    }
+    @objc func doHotKeys() {
+        var c = readConf(); c["HOTKEYS"] = HotKeys.enabled(c["HOTKEYS"]) ? "0" : "1"; writeConf(c); startHotKeys()
     }
 
     /// Without the screen permission the app waits for it (tick reopens the app
@@ -610,7 +638,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         permItem.title = t("perm"); permScreen.title = t("perm_screen"); permMic.title = t("perm_mic")
         doctorItem.title = t("doctor"); doctorItem.isEnabled = !busy
         connectItem.title = Sources(dir: dir, conf: readConf()).configured.contains { $0 == "ics" || $0 == "macos" } ? t("connect_again") : t("connect")
-        languageItem.title = t("language"); restartItem.title = t("restart"); quitItem.title = t("quit")
+        languageItem.title = t("language"); hotKeysItem.title = t("hotkeys"); hotKeysItem.state = HotKeys.enabled(readConf()["HOTKEYS"]) ? .on : .off; restartItem.title = t("restart"); quitItem.title = t("quit")
         // The recording lives in this process now: restarting would cut it.
         restartItem.isEnabled = !on && !busy
         loginItem.title = t("login"); loginItem.state = loginOn ? .on : .off

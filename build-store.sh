@@ -18,7 +18,7 @@ VERSION="${IPSIO_VERSION:-1.0}"
 BUILD="${IPSIO_BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 SIGN="${IPSIO_STORE_SIGN:--}"
 OUT=dist; APP="$OUT/Ipsio.app"
-SRC=(app/Schedule.swift app/MacCalendar.swift app/Setup.swift app/SetupWindow.swift app/Engine/*.swift app/Ipsio.swift)
+SRC=(app/Schedule.swift app/MacCalendar.swift app/Setup.swift app/SetupWindow.swift app/HotKey.swift app/Engine/*.swift app/Ipsio.swift)
 for d in app/Store app/Transcribe; do [ -d "$d" ] && SRC+=("$d"/*.swift); done
 
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -57,6 +57,22 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
+
+# The App Store checks which SDK and Xcode built the app (the DT keys Xcode
+# writes). A store upload needs Xcode installed; an ad hoc build does not.
+PB=/usr/libexec/PlistBuddy; P="$APP/Contents/Info.plist"
+SDKV=$(xcrun --sdk macosx --show-sdk-version); SDKB=$(xcrun --sdk macosx --show-sdk-build-version)
+for kv in "DTSDKName macosx$SDKV" "DTSDKBuild $SDKB" "DTPlatformName macosx" "DTPlatformVersion $SDKV" \
+          "DTPlatformBuild $SDKB" "DTCompiler com.apple.compilers.llvm.clang.1_0" "BuildMachineOSBuild $(sw_vers -buildVersion)"; do
+  $PB -c "Add :${kv%% *} string ${kv#* }" "$P"
+done
+if XV=$(xcodebuild -version 2>/dev/null); then
+  # "Xcode 16.4" -> 1640, "Xcode 26.0.1" -> 2601
+  $PB -c "Add :DTXcode string $(echo "$XV" | awk 'NR==1{split($2,v,"."); printf "%d%d%d", v[1], v[2], v[3]}')" "$P"
+  $PB -c "Add :DTXcodeBuild string $(echo "$XV" | awk 'NR==2{print $3}')" "$P"
+elif [ -n "${IPSIO_TEAM:-}" ]; then
+  echo "a store upload needs Xcode (xcode-select -s /Applications/Xcode.app); the Command Line Tools alone are refused"; exit 1
+fi
 
 if [ -f icon.png ]; then
   I="$T/Ipsio.iconset"; mkdir -p "$I"
