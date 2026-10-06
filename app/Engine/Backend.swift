@@ -102,6 +102,11 @@ final class Backend {
     var modeRec: String { dir + "/recording-mode" }
 
     var recording: Bool { capture.recording }
+    /// The helper mode's live audio (app/Helper): set to listen, nil to stop.
+    var audioTap: ((Recorder.AudioTrack, CMSampleBuffer) -> Void)? {
+        get { (capture as? Recorder)?.audioTap }
+        set { (capture as? Recorder)?.audioTap = newValue }
+    }
     /// The watchdog's signal: the system stopped the capture, or a recording
     /// of a previous run of the app was left behind with nothing capturing it.
     var diedByItself: Bool {

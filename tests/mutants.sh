@@ -191,6 +191,46 @@ engine_mutant Backend.swift "the disk minimum ignores the preset" 'minGB: q.minF
 engine_mutant Backend.swift "a window in the conf is honored" 'CaptureTarget.parse(oneShot: env["IPSIO_TARGET"]) ?? CaptureTarget.parse(conf: c["CAPTURE_TARGET"])' 'CaptureTarget.parse(oneShot: env["IPSIO_TARGET"] ?? c["CAPTURE_TARGET"]) ?? .main'
 engine_mutant Backend.swift "a gone window reads as a failed start" '            case .windowGone: return t("window_gone")' '            case .noDisplay where false: return t("window_gone")'
 engine_mutant Backend.swift "a display fallback is not said" 'target = "main_fallback"; out.append(t("display_gone"))' 'target = "main"'
+# Helper mode (Ipsio 1.1): cadence, dedup, sides, consent, secrets and the summary.
+helper_mutant() { # <file in app/Helper> <name> <original text> <broken text>
+  rm -rf "$T/Helper"; cp -R "$ROOT/app/Helper" "$T/Helper"
+  python3 - "$ROOT/app/Helper/$1" "$T/Helper/$1" "$3" "$4" <<'PY' || { echo "ERROR: the snippet for mutant '$2' is no longer in $1"; ALIVE=$((ALIVE+1)); return; }
+import sys
+src, dst, a, b = sys.argv[1:5]
+s = open(src, encoding="utf-8").read()
+if a not in s: sys.exit(1)
+open(dst, "w", encoding="utf-8").write(s.replace(a, b, 1))
+PY
+  if ! swiftc -parse-as-library "$ROOT/app/Transcribe/Transcript.swift" "$T/Helper/HelperCore.swift" "$T/Helper/HelperTexts.swift" "$T/Helper/HelperCloud.swift" \
+       "$ROOT/tests/HelperTests.swift" -o "$T/he" 2>"$T/err"; then
+    echo "ERROR: mutant '$2' does not compile"; tail -3 "$T/err"; ALIVE=$((ALIVE+1)); return; fi
+  if "$T/he" >/dev/null 2>&1; then echo "SURVIVED: $2"; ALIVE=$((ALIVE+1)); else echo "killed: $2"; fi
+}
+H=HelperCore.swift
+helper_mutant $H "cadence too frequent" 'if let l = lastAsk, now - l < Cadence.minGap { return false }' 'if let l = lastAsk, now - l < Cadence.minGap / 4 { return false }'
+helper_mutant $H "two requests in flight" 'guard !inFlight, othersWords >= Cadence.minWords' 'guard othersWords >= Cadence.minWords'
+helper_mutant $H "asks while the others still speak" 'guard now - heard > Cadence.pause else' 'guard now - heard >= 0 else'
+helper_mutant $H "no backoff after an error" 'notBefore = now + min(Cadence.maxBackoff' 'notBefore = now + 0 * min(Cadence.maxBackoff'
+helper_mutant $H "dedup off" 'now - $0.t < HelperState.dedupSeconds && HelperText.norm($0.text) == n' 'now - $0.t < 0 && HelperText.norm($0.text) == n'
+helper_mutant $H "wrong side attribution (me read as others)" 'case "me", "eu", "user", "usuário", "usuario": return .me' 'case "me", "eu", "user", "usuário", "usuario": return .others'
+helper_mutant $H "the brain's side wins over the track" 'let side = heardSide(of: c.text) ?? c.side' 'let side = c.side'
+helper_mutant $H "the user's words count as the others' turn" 'if who == .others { othersWords +=' 'if who == .me || who == .others { othersWords +='
+helper_mutant $H "the microphone echo is kept" 'if Echo.isEcho(' 'if false && Echo.isEcho('
+helper_mutant $H "the window never compacts" 'now - f.t > HelperState.windowSeconds' 'now - f.t > HelperState.windowSeconds * 1000'
+helper_mutant $H "key kept in the conf" 'c.filter { k, v in !k.hasPrefix("HELPER_") || redact(v, key: key) == v }' 'c.filter { _, _ in true }'
+helper_mutant $H "key pattern not hidden" 'while let r = out.range(of: "sk-ant-' 'while false, let r = out.range(of: "sk-ant-'
+helper_mutant $H "cloud used without consent (policy)" 'guard c[HelperConf.consent] == "1" else { return .needsConsent }' ''
+helper_mutant $H "cloud used when helper mode is off" 'guard HelperConf.on(c) else { return .off }' 'guard HelperConf.on(c) || HelperConf.wantsCloud(c) else { return .off }'
+helper_mutant $H "the local brain falls back to the cloud" 'if let why = localUnavailable { return .unavailable(why) }' 'if let why = localUnavailable { return hasKey ? .cloud : .unavailable(why) }'
+helper_mutant $H "an invented source is kept" ' || !(citations?.contains(s) ?? false)' ''
+helper_mutant $H "more than 3 tips" 'if r.tips.count == maxTips { break }' ''
+helper_mutant $H "the summary is written over the recording" '{ (media as NSString).deletingPathExtension + ".helper.md" }' '{ media }'
+helper_mutant $H "the summary lands next to an evidence file" 'guard ["mov", "mkv", "mp4", "m4a"].contains(ext) else { throw Failure.refused(media) }' ''
+helper_mutant $H "a line is cut while still being spoken" 'return now - l >= quiet' 'return now - l >= 0'
+H=HelperCloud.swift
+helper_mutant $H "cloud used without consent (brain)" 'guard consent() else { throw CloudError.noConsent }' ''
+helper_mutant $H "key leaks into the error text (log)" 'throw CloudError.http(code, HelperSecrets.redact(HelperText.clip(msg, 200), key: k))' 'throw CloudError.http(code, HelperText.clip(msg, 200))'
+helper_mutant $H "no web search for the cloud" 'if r.research { body["tools"]' 'if false { body["tools"]'
 echo
 [ "$ALIVE" -eq 0 ] && echo "all mutants killed" || echo "$ALIVE mutant(s) alive"
 [ "$ALIVE" -eq 0 ]

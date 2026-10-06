@@ -26,7 +26,7 @@ jobs:
       - name: build the app, ipsio-calendar and the device creator
         run: |
           swiftc --version
-          swiftc -O -parse-as-library app/Schedule.swift app/MacCalendar.swift app/Setup.swift app/SetupWindow.swift app/Consent.swift app/Report.swift app/MeetingDetect.swift app/Search.swift app/SearchWindow.swift app/HotKey.swift app/Engine/*.swift app/Store/*.swift app/Transcribe/*.swift app/Ipsio.swift -framework AppKit -o "$RUNNER_TEMP/Ipsio"
+          swiftc -O -parse-as-library app/Schedule.swift app/MacCalendar.swift app/Setup.swift app/SetupWindow.swift app/Consent.swift app/Report.swift app/MeetingDetect.swift app/Search.swift app/SearchWindow.swift app/HotKey.swift app/Engine/*.swift app/Store/*.swift app/Transcribe/*.swift app/Helper/*.swift app/Ipsio.swift -framework AppKit -o "$RUNNER_TEMP/Ipsio"
           swiftc -O -parse-as-library app/Schedule.swift app/MacCalendar.swift app/CalendarCLI.swift -o "$RUNNER_TEMP/ipsio-calendar"
           swiftc -O tools/create-device.swift -o "$RUNNER_TEMP/create-device"
       - name: calendar bench
@@ -54,6 +54,10 @@ jobs:
         run: |
           swiftc -parse-as-library app/Transcribe/*.swift tests/TranscribeTests.swift -o "$RUNNER_TEMP/transcribe-tests"
           "$RUNNER_TEMP/transcribe-tests"
+      - name: helper mode bench (cadence, dedup, sides, consent, secrets, the cloud against a fake server)
+        run: |
+          swiftc -parse-as-library app/Transcribe/Transcript.swift app/Helper/HelperCore.swift app/Helper/HelperTexts.swift app/Helper/HelperCloud.swift tests/HelperTests.swift -o "$RUNNER_TEMP/helper-tests"
+          "$RUNNER_TEMP/helper-tests"
       - name: shortcut bench (global hot keys)
         run: |
           swiftc -parse-as-library app/HotKey.swift tests/HotKeyTests.swift -o "$RUNNER_TEMP/hotkey-tests"

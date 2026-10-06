@@ -65,6 +65,19 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudio
 
     var recording: Bool { q.sync { writer != nil } }
 
+    // ---- live audio for the helper mode (app/Helper) ----
+    enum AudioTrack { case system, mic }
+    private let tapQ = DispatchQueue(label: "ipsio.recorder.tap")
+    private let tapLock = NSLock()
+    private var tap: ((AudioTrack, CMSampleBuffer) -> Void)?
+    /// Every audio buffer, handed over on its own queue (never the capture's).
+    /// nil, the default, costs one check and never changes what is written.
+    var audioTap: ((AudioTrack, CMSampleBuffer) -> Void)? {
+        get { tapLock.lock(); defer { tapLock.unlock() }; return tap }
+        set { tapLock.lock(); tap = newValue; tapLock.unlock() }
+    }
+    private func forward(_ t: AudioTrack, _ sb: CMSampleBuffer) { if let f = audioTap { tapQ.async { f(t, sb) } } }
+
     static func now() -> Double { CMClockGetTime(CMClockGetHostTimeClock()).seconds }
 
     /// Largest frame H.264 encodes (level 5.2, 4096x2304): a 5K screen is scaled down.
@@ -168,14 +181,14 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudio
             guard st == .complete else { return }
             w.appendVideo(sb); note(sb)
         case .audio:
-            w.appendSystem(sb); feed(&system, sb); note(sb)
+            w.appendSystem(sb); feed(&system, sb); note(sb); forward(.system, sb)
         default:
-            if #available(macOS 15.0, *), type == .microphone { w.appendMic(sb); if mic != nil { feed(&mic!, sb) } }
+            if #available(macOS 15.0, *), type == .microphone { w.appendMic(sb); if mic != nil { feed(&mic!, sb) }; forward(.mic, sb) }
         }
     }
     func captureOutput(_ o: AVCaptureOutput, didOutput sb: CMSampleBuffer, from c: AVCaptureConnection) {
         guard let w = writer else { return }
-        w.appendMic(sb); if mic != nil { feed(&mic!, sb) }
+        w.appendMic(sb); if mic != nil { feed(&mic!, sb) }; forward(.mic, sb)
     }
     private func feed(_ m: inout Meter, _ sb: CMSampleBuffer) {
         if let e = AudioEnergy.of(sb) { m.add(sumSquares: e.sumSquares, frames: e.values, at: CMSampleBufferGetPresentationTimeStamp(sb).seconds) }

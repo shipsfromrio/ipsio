@@ -52,6 +52,11 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         #endif
         return Backend(dir: dir, capture: Recorder(), host: h, conf: { [unowned self] in self.readConf() })
     }()
+    // ---- helper mode hook (app/Helper, Ipsio 1.1) ----
+    lazy var helper = HelperController(conf: { [unowned self] in self.readConf() },
+                                       writeConf: { [unowned self] in self.writeConf($0); self.refresh() },
+                                       lang: { [unowned self] in self.lang }, backend: { [unowned self] in self.backend })
+    // ---- end helper mode hook ----
     var timer: Timer?
     var calendarTimer: Timer?
     let statusItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -373,6 +378,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         targetItem.submenu = targetMenu; menu.addItem(targetItem)
         qualityItem.submenu = qualityMenu; menu.addItem(qualityItem)
         menu.addItem(consentItem)
+        menu.addItem(helper.menuItem)   // helper mode hook (app/Helper)
         upcomingItem.submenu = upcomingMenu; menu.addItem(upcomingItem)
         recentItem.submenu = recentMenu; menu.addItem(recentItem); menu.addItem(searchItem)
         menu.addItem(openItem); menu.addItem(titleItem); menu.addItem(folderItem)
@@ -762,6 +768,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         languageItem.title = t("language"); hotKeysItem.title = t("hotkeys"); searchItem.title = t("search_menu"); detectItem.title = t("detect_menu"); consentItem.title = Consent.t("menu", lang: lang); consentItem.state = Consent.enabled(readConf()) ? .on : .off; detectItem.state = readConf()["DETECT_MEETINGS"] == "0" ? .off : .on; hotKeysItem.state = HotKeys.enabled(readConf()["HOTKEYS"]) ? .on : .off; restartItem.title = t("restart"); quitItem.title = t("quit")
         // The recording lives in this process now: restarting would cut it.
         restartItem.isEnabled = !on && !busy
+        helper.refresh(recording: on, file: { [unowned self] in self.currentFile() })   // helper mode hook: starts and stops with the recording
         loginItem.title = t("login"); loginItem.state = loginOn ? .on : .off
         let lic = license()
         for m in [licenseItem, buyItem, restoreItem] { m.isHidden = !License.offersPurchase(lic) }

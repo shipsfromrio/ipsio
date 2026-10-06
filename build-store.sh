@@ -19,7 +19,7 @@ BUILD="${IPSIO_BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 SIGN="${IPSIO_STORE_SIGN:--}"
 OUT=dist; APP="$OUT/Ipsio.app"
 SRC=(app/Schedule.swift app/MacCalendar.swift app/Setup.swift app/SetupWindow.swift app/Consent.swift app/Report.swift app/MeetingDetect.swift app/Search.swift app/SearchWindow.swift app/HotKey.swift app/Engine/*.swift app/Ipsio.swift)
-for d in app/Store app/Transcribe; do [ -d "$d" ] && SRC+=("$d"/*.swift); done
+for d in app/Store app/Transcribe app/Helper; do [ -d "$d" ] && SRC+=("$d"/*.swift); done
 
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
