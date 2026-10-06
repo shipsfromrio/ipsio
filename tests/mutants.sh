@@ -46,7 +46,8 @@ mutant "a covered invite starts after the call" '$0.id != c && $0.end > cur.end'
 mutant "a removed calendar records from the cache" '.filter { c.contains($0.source) }' ''
 mutant "the runner ignores its deadline" 'g.wait(timeout: .now() + limit)' 'g.wait(timeout: .now() + limit * 100)'
 # The native engine: the same idea, one file of app/Engine at a time, against
-# tests/EngineTests.swift.
+# the bench in BENCH (tests/EngineTests.swift, then tests/BackendTests.swift).
+BENCH=(tests/EngineTests.swift)
 engine_mutant() { # <file in app/Engine> <name> <original text> <broken text>
   rm -rf "$T/Engine"; cp -R "$ROOT/app/Engine" "$T/Engine"
   python3 - "$ROOT/app/Engine/$1" "$T/Engine/$1" "$3" "$4" <<'PY' || { echo "ERROR: the snippet for mutant '$2' is no longer in $1"; ALIVE=$((ALIVE+1)); return; }
@@ -56,7 +57,8 @@ s = open(src, encoding="utf-8").read()
 if a not in s: sys.exit(1)
 open(dst, "w", encoding="utf-8").write(s.replace(a, b, 1))
 PY
-  if ! swiftc -parse-as-library "$T"/Engine/*.swift "$ROOT/tests/EngineTests.swift" -o "$T/e" 2>"$T/err"; then
+  local files=(); for f in "${BENCH[@]}"; do files+=("$ROOT/$f"); done
+  if ! swiftc -parse-as-library "$T"/Engine/*.swift "${files[@]}" -o "$T/e" 2>"$T/err"; then
     echo "ERROR: mutant '$2' does not compile"; tail -3 "$T/err"; ALIVE=$((ALIVE+1)); return; fi
   if "$T/e" >/dev/null 2>&1; then echo "SURVIVED: $2"; ALIVE=$((ALIVE+1)); else echo "killed: $2"; fi
 }
@@ -70,6 +72,18 @@ engine_mutant Files.swift "evidence stops at the first block" 'hasher.update(dat
 engine_mutant Files.swift "collision overwrites" 'while exists(out) {' 'while false && exists(out) {'
 engine_mutant Writer.swift "no fragments: a crash loses the file" 'writer.movieFragmentInterval = CMTime(seconds: s.fragment, preferredTimescale: 600)' ''
 engine_mutant Writer.swift "the microphone track is never added" 'micIn = s.microphone ? AVAssetWriterInput' 'micIn = false ? AVAssetWriterInput'
+# The backend: the verdicts the app acts on.
+BENCH=(app/Setup.swift tests/BackendTests.swift)
+engine_mutant Backend.swift "no microphone sample counts as live" 'micOk = !mic.isEmpty &&' 'micOk = mic.isEmpty ||'
+engine_mutant Backend.swift "class mode demands a microphone" 'if meeting && micName == nil {' 'if micName == nil {'
+engine_mutant Backend.swift "the disk minimum is ignored at start" 'if let f = free, f < s.minGB {' 'if let f = free, f < 0 {'
+engine_mutant Backend.swift "a second stop saves (and hooks) again" 'defer { try? fm.removeItem(atPath: fileRec); try? fm.removeItem(atPath: modeRec) }' ''
+engine_mutant Backend.swift "a crash leaves no signal for the watchdog" 'return FileManager.default.fileExists(atPath: fileRec)' 'return false'
+engine_mutant Backend.swift "a stalled meter reads as room silence" 'case "NO_SOUND" where snap.meterAge > Sound.staleSeconds:' 'case "NO_SOUND" where false:'
+engine_mutant Backend.swift "the test take gets evidence" 'if !testTake { afterSave(path, s) }' 'afterSave(path, s)'
+engine_mutant Backend.swift "the test take is left on disk" 'try? FileManager.default.removeItem(atPath: file)' ''
+engine_mutant Backend.swift "silence counts as 0 dB in the mean" '($1.isFinite ? pow(10, Double($1) / 10) : 0)' '($1.isFinite ? pow(10, Double($1) / 10) : 1)'
+engine_mutant Texts.swift "an argument is filled twice" 'out += a[n - 1]; i += 2' 'out += a[n - 1]; i += 2; out = fill(out, a)'
 echo
 [ "$ALIVE" -eq 0 ] && echo "all mutants killed" || echo "$ALIVE mutant(s) alive"
 [ "$ALIVE" -eq 0 ]

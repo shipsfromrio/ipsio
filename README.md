@@ -209,6 +209,7 @@ in [`docs/DESIGN.md`](docs/DESIGN.md), with no code yet.
     bash tests/test-ipsio.sh      # the script, with test doubles: runs on Linux and macOS
     swiftc -parse-as-library app/Schedule.swift tests/ScheduleTests.swift -o /tmp/t && /tmp/t
     swiftc -parse-as-library app/Engine/*.swift tests/EngineTests.swift -o /tmp/e && /tmp/e   # native engine
+    swiftc -parse-as-library app/Engine/*.swift app/Setup.swift tests/BackendTests.swift -o /tmp/b && /tmp/b   # the app's backend
     bash tests/mutants.sh         # plants defects in the calendar and the engine; each must fail its bench
 
 CI (GitHub Actions) runs `bash -n`, `shellcheck`, both benches, the mutants

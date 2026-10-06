@@ -1,14 +1,11 @@
-// Ipsio: menu-bar app (next to the clock) that calls ipsio.sh.
+// Ipsio: menu-bar app (next to the clock) that records with the native
+// engine (app/Engine: ScreenCaptureKit + AVAssetWriter, no BlackHole, no ffmpeg).
 // Builds without Xcode: bash install-app.sh (uses swiftc from the Command Line Tools).
 //
-// Why an app and not Terminal: the Screen Recording and Microphone permissions
-// (TCC) belong to the RESPONSIBLE PROCESS. Here that is this app, so it asks
-// for the permissions itself and the ffmpeg child inherits them. The script
-// stays the single source of the recipe: the app only calls subcommands and
-// shows their output (first line = popup title).
-//
+// The engine answers run("start"), run("stop")... in the format ipsio.sh
+// always answered (Backend.swift): first line = popup title, then the body.
 // The app picks icon and alarm from the "#state key=value" line that ends
-// every script output, never from the human text: the text changes with the
+// every output, never from the human text: the text changes with the
 // language (UI_LANGUAGE='pt'|'en' in the conf, switched by the flag item in
 // the menu).
 //
@@ -16,11 +13,9 @@
 // - reads the live meter (level subcommand) every 3 s; 90 s of silence in a
 //   row turn the icon yellow + an alert saying what to do. In meeting mode, the
 //   same for the microphone (90 s of a DEAD microphone, not of you being quiet);
-// - watches the recorder: a dead pid with the pid file still there = it
-//   stopped by itself (disk full, crash), and the app says so with the log tail;
-// - on launch, if nothing is recording and the system output was left on
-//   Ipsio's device (app or Mac went down mid-recording), it gives the
-//   speakers back.
+// - watches the recorder: macOS stopping the capture, or a recording left by
+//   a run of the app that went down mid-way, is "stopped by itself", and the
+//   app says so (the fragmented .mov keeps everything up to the last 2 s).
 //
 // Calendar (Schedule.swift): reads the sources every 5 min and records each
 // meeting by itself, from start minus 2 min to end plus 5 min, in meeting mode,
@@ -43,7 +38,13 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     let modeMenu = NSMenu()
     let permMenu = NSMenu()
     let dir = ProcessInfo.processInfo.environment["IPSIO_DIR"] ?? (NSHomeDirectory() + "/.ipsio")
-    let script = ProcessInfo.processInfo.environment["IPSIO_SCRIPT"] ?? ((Bundle.main.resourcePath ?? "") + "/ipsio.sh")
+    lazy var backend: Backend = {
+        var h = Host()
+        #if STORE
+        h.hook = nil      // the store build runs no commands
+        #endif
+        return Backend(dir: dir, capture: Recorder(), host: h, conf: { [unowned self] in self.readConf() })
+    }()
     var timer: Timer?
     var calendarTimer: Timer?
     let statusItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -74,9 +75,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     // reopens it; quitting means unloading the agent until the next login.
     let quitItem = NSMenuItem(title: "", action: #selector(doQuit), keyEquivalent: "q")
     var confPath: String { dir + "/conf" }
-    var pidPath: String { dir + "/pid" }
-    var logPath: String { dir + "/log" }
-    // Silence: the script says silence=N (and mic_silence=N in meeting mode) on
+    // Silence: the engine says silence=N (and mic_silence=N in meeting mode) on
     // the #state line; above this threshold the app raises the alarm. 90 s
     // covers a pause without crying wolf.
     let silenceThreshold = 90
@@ -127,16 +126,16 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "mic_dead_for": "MICROFONE MUDO há %@ s", "mic_alarm_title": "MICROFONE MUDO HÁ %@ SEGUNDOS",
             "mic_alarm_body": "A sua voz não está entrando na gravação: microfone sem permissão, no mudo ou com o volume de entrada no zero. Os outros continuam sendo gravados.",
             "died_title": "A GRAVAÇÃO PAROU SOZINHA",
-            "died_body": "O gravador morreu sem você pedir (disco cheio, energia, erro). O que já foi gravado está salvo no arquivo.\n\nFim do log:\n%@",
+            "died_body": "A gravação parou sem você pedir (o macOS parou a captura, ou o app ou o Mac caíram). O que já foi gravado está salvo no arquivo.\n\nMotivo:\n%@",
             "record_again": "Gravar de novo", "ok": "OK",
             "no_perm_title": "Falta a permissão de Gravação de Tela",
             "no_perm_body": "Em Ajustes do Sistema > Privacidade e Segurança > Gravação de Tela e Áudio do Sistema, ligue \"Ipsio\". Depois use \"Reiniciar o app\" no menu e grave de novo.",
             "no_mic_title": "Falta a permissão de Microfone",
-            "no_mic_body": "O som do computador chega pelo BlackHole, que o macOS trata como microfone; e a reunião grava também a sua voz. Em Ajustes do Sistema > Privacidade e Segurança > Microfone, ligue \"Ipsio\".",
+            "no_mic_body": "A reunião grava também a sua voz. Em Ajustes do Sistema > Privacidade e Segurança > Microfone, ligue \"Ipsio\".",
             "notif_recording": "Gravando", "notif_saved": "Gravação salva", "did_not_start": "Não começou a gravar",
             "volume": "Volume da gravação", "test_title": "Teste", "no_log": "(sem log)",
             "title_title": "Título das gravações",
-            "title_body": "Entra no nome do arquivo, depois da data e hora. Ex.: 2026-09-12_10-37 Curso de exemplo.mkv. Vale para as próximas gravações feitas à mão até você trocar. As da agenda usam o nome da reunião.",
+            "title_body": "Entra no nome do arquivo, depois da data e hora. Ex.: 2026-09-12_10-37 Curso de exemplo.mov. Vale para as próximas gravações feitas à mão até você trocar. As da agenda usam o nome da reunião.",
             "save": "Salvar", "cancel": "Cancelar", "use_folder": "Usar esta pasta", "where": "Onde guardar as gravações",
             "verdict_NO_SOUND": "SEM SOM", "verdict_LOW": "SOM BAIXO", "verdict_LOUD": "SOM ALTO", "verdict_OK": "SOM OK",
             "upcoming": "Próximas gravações", "calendar_auto": "Gravar as reuniões da agenda sozinho",
@@ -161,7 +160,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "calendar_stale": "⚠ Agenda sem atualizar desde %@", "calendar_never": "a abertura do app",
             "calendar_stale_title": "A agenda parou de atualizar",
             "script_timeout_title": "O Ipsio não respondeu",
-            "script_timeout_body": "O passo “%@” passou de %@ s e foi interrompido. Costuma ser um dispositivo de som ou a captura de tela travados: desconecte e conecte o fone ou a placa de som, ou reinicie o Mac, e tente de novo.",
+            "script_timeout_body": "O passo “%@” passou de %@ s e foi interrompido. Costuma ser a captura de tela travada: reinicie o Mac e tente de novo.",
             "check_running": "Ainda conferindo o arquivo anterior.",
             "calendar_stale_body": "A leitura falha desde %@. O Ipsio segue gravando pela última leitura, mas reunião marcada depois disso não entra. Motivo: %@",
             "connect_choice_body": "De onde o Ipsio lê as suas reuniões? O Calendário do Mac já tem as contas que você adicionou nele (Google, iCloud, Exchange): basta um \"Permitir\". O endereço iCal serve para uma agenda que não está no Calendário.",
@@ -170,22 +169,22 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "connect_mac_denied": "O macOS não deu acesso aos Calendários. Em Ajustes do Sistema > Privacidade e Segurança > Calendários, ligue \"Ipsio\" e conecte de novo.",
             "setup_title": "Configurar o Ipsio",
             "setup_intro": "O Ipsio precisa destes itens para gravar. Cada linha fica verde sozinha quando ficar pronta: pode resolver na ordem que quiser.",
-            "setup_zoom": "Falta só você, uma vez: no Zoom, Teams ou Meet, escolha o alto-falante \"%@\".",
+            "setup_zoom": "Nada para mudar no Zoom, Teams ou Meet: o Ipsio grava o som que o Mac toca, no alto-falante que você já usa.",
             "setup_close": "Fechar", "setup_checking": "Conferindo…", "setup_missing": "falta",
             "setup_ready": "Tudo pronto. Faça um teste de 20 s.", "setup_left_one": "Falta 1 item.", "setup_left": "Faltam %@ itens.",
-            "setup_script": "O gravador respondeu", "setup_script_hint": "O app não conseguiu rodar o ipsio.sh. Instale de novo com o install.sh.",
-            "setup_dir": "Pasta de configuração", "setup_dir_hint": "A pasta do Ipsio tem um caractere que ele não aceita (espaço, dois-pontos, vírgula). Aponte IPSIO_DIR para um caminho simples.",
+            "setup_script": "O gravador respondeu", "setup_script_hint": "O gravador não respondeu à conferência. Reinicie o app.",
+            "setup_dir": "Pasta de configuração", "setup_dir_hint": "Não consegui criar a pasta de configuração do Ipsio (~/.ipsio). Confira as permissões da sua pasta pessoal.",
             "setup_ffmpeg": "ffmpeg, o gravador", "setup_ffmpeg_hint": "Instala pelo Homebrew, sem senha.",
             "setup_switchaudio": "SwitchAudioSource, que troca a saída de som", "setup_switchaudio_hint": "Instala pelo Homebrew, sem senha.",
             "setup_blackhole": "BlackHole, que capta o som do computador", "setup_blackhole_hint": "Instala pelo Homebrew e pede a senha do Mac. Se não aparecer depois, reinicie o Mac.",
             "setup_device": "Saída de som \"%@\"", "setup_device_hint": "Toca no seu alto-falante e manda o mesmo som para o gravador. Um clique cria.",
             "setup_screen": "Tela visível para o gravador", "setup_screen_hint": "O ffmpeg não encontrou a tela. Reinicie o Mac e confira de novo.",
             "setup_screen_permission": "Permissão de Gravação de Tela", "setup_screen_permission_hint": "Em Ajustes, ligue \"Ipsio\" na lista. O app fecha quando a permissão entrar e volta sozinho (se não voltar, abra o Ipsio de novo).",
-            "setup_mic_permission": "Permissão de Microfone", "setup_mic_permission_hint": "O som do computador entra pelo BlackHole, que o macOS trata como microfone; e a reunião grava a sua voz.",
-            "setup_microphone": "Microfone do modo reunião", "setup_microphone_hint": "Escolha o microfone de verdade em Som > Entrada, ou mude para o modo aula no menu.",
+            "setup_mic_permission": "Permissão de Microfone", "setup_mic_permission_hint": "A reunião grava a sua voz.",
+            "setup_microphone": "Microfone do modo reunião", "setup_microphone_hint": "O Mac não tem entrada de som. Conecte um microfone, ou mude para o modo aula no menu.",
             "setup_folder": "Pasta das gravações", "setup_folder_hint": "Não consegui criar a pasta. Escolha outra.",
             "setup_disk": "Espaço em disco", "setup_disk_hint": "Pouco espaço: uma hora de gravação ocupa cerca de 2 GB. Libere espaço ou escolha uma pasta em outro disco.",
-            "setup_other": "Outro item", "setup_other_hint": "O ipsio.sh acusou um item que esta janela ainda não conhece. Rode ipsio doctor no Terminal para ver qual.",
+            "setup_other": "Outro item", "setup_other_hint": "O gravador acusou um item que esta janela ainda não conhece. Atualize o Ipsio.",
             "setup_calendar": "Agenda (opcional)", "setup_calendar_hint": "Conecte a sua agenda para o Ipsio gravar as reuniões sozinho.",
             "fix_install": "Instalar", "fix_create": "Criar", "fix_settings": "Abrir Ajustes", "fix_allow": "Permitir",
             "fix_sound": "Abrir Som", "fix_folder": "Escolher pasta", "fix_calendar": "Conectar",
@@ -208,16 +207,16 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "mic_dead_for": "MICROPHONE DEAD for %@ s", "mic_alarm_title": "MICROPHONE DEAD FOR %@ SECONDS",
             "mic_alarm_body": "Your voice is not getting into the recording: microphone without permission, muted, or input volume at zero. The others are still being recorded.",
             "died_title": "THE RECORDING STOPPED BY ITSELF",
-            "died_body": "The recorder died without you asking (disk full, power, error). What was already recorded is saved in the file.\n\nEnd of log:\n%@",
+            "died_body": "The recording stopped without you asking (macOS stopped the capture, or the app or the Mac went down). What was already recorded is saved in the file.\n\nReason:\n%@",
             "record_again": "Record again", "ok": "OK",
             "no_perm_title": "Screen Recording permission missing",
             "no_perm_body": "In System Settings > Privacy & Security > Screen & System Audio Recording, enable \"Ipsio\". Then use \"Restart the app\" in the menu and record again.",
             "no_mic_title": "Microphone permission missing",
-            "no_mic_body": "Computer sound comes in through BlackHole, which macOS treats as a microphone; and meetings also record your voice. In System Settings > Privacy & Security > Microphone, enable \"Ipsio\".",
+            "no_mic_body": "Meetings also record your voice. In System Settings > Privacy & Security > Microphone, enable \"Ipsio\".",
             "notif_recording": "Recording", "notif_saved": "Recording saved", "did_not_start": "Did not start recording",
             "volume": "Recording volume", "test_title": "Test", "no_log": "(no log)",
             "title_title": "Recording title",
-            "title_body": "Goes into the file name, after date and time. E.g. 2026-09-12_10-37 Sample course.mkv. Applies to the next manual recordings until you change it. Calendar recordings use the meeting name.",
+            "title_body": "Goes into the file name, after date and time. E.g. 2026-09-12_10-37 Sample course.mov. Applies to the next manual recordings until you change it. Calendar recordings use the meeting name.",
             "save": "Save", "cancel": "Cancel", "use_folder": "Use this folder", "where": "Where to keep the recordings",
             "verdict_NO_SOUND": "NO SOUND", "verdict_LOW": "SOUND TOO LOW", "verdict_LOUD": "SOUND TOO LOUD", "verdict_OK": "SOUND OK",
             "upcoming": "Upcoming recordings", "calendar_auto": "Record calendar meetings automatically",
@@ -242,7 +241,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "calendar_stale": "⚠ Calendar not updated since %@", "calendar_never": "the app opened",
             "calendar_stale_title": "The calendar stopped updating",
             "script_timeout_title": "Ipsio did not answer",
-            "script_timeout_body": "The step “%@” took over %@ s and was stopped. It is usually a wedged sound device or screen capture: unplug and replug the headset or sound card, or restart the Mac, and try again.",
+            "script_timeout_body": "The step “%@” took over %@ s and was stopped. It is usually a wedged screen capture: restart the Mac and try again.",
             "check_running": "Still checking the previous file.",
             "calendar_stale_body": "Reading has failed since %@. Ipsio keeps recording from the last reading, but a meeting added after that will be missed. Reason: %@",
             "connect_choice_body": "Where should Ipsio read your meetings from? The Mac's Calendar already has the accounts you added to it (Google, iCloud, Exchange): one \"Allow\" is enough. The iCal address is for a calendar that is not in Calendar.",
@@ -251,22 +250,22 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "connect_mac_denied": "macOS did not grant access to Calendars. In System Settings > Privacy & Security > Calendars, turn on \"Ipsio\" and connect again.",
             "setup_title": "Set up Ipsio",
             "setup_intro": "Ipsio needs these to record. Each line turns green by itself once it is ready, so fix them in any order.",
-            "setup_zoom": "One thing only you can do, once: in Zoom, Teams or Meet, pick the speaker \"%@\".",
+            "setup_zoom": "Nothing to change in Zoom, Teams or Meet: Ipsio records the sound the Mac plays, on the speaker you already use.",
             "setup_close": "Close", "setup_checking": "Checking…", "setup_missing": "missing",
             "setup_ready": "All set. Run a 20 s test.", "setup_left_one": "1 item left.", "setup_left": "%@ items left.",
-            "setup_script": "The recorder answered", "setup_script_hint": "The app could not run ipsio.sh. Install again with install.sh.",
-            "setup_dir": "Settings folder", "setup_dir_hint": "Ipsio's folder has a character it cannot use (space, colon, comma). Point IPSIO_DIR to a simple path.",
+            "setup_script": "The recorder answered", "setup_script_hint": "The recorder did not answer the check. Restart the app.",
+            "setup_dir": "Settings folder", "setup_dir_hint": "Could not create Ipsio's settings folder (~/.ipsio). Check the permissions of your home folder.",
             "setup_ffmpeg": "ffmpeg, the recorder", "setup_ffmpeg_hint": "Installs through Homebrew, no password.",
             "setup_switchaudio": "SwitchAudioSource, which switches the sound output", "setup_switchaudio_hint": "Installs through Homebrew, no password.",
             "setup_blackhole": "BlackHole, which captures the computer sound", "setup_blackhole_hint": "Installs through Homebrew and asks for the Mac's password. If it does not show up afterwards, restart the Mac.",
             "setup_device": "Sound output \"%@\"", "setup_device_hint": "Plays on your speaker and sends the same sound to the recorder. One click creates it.",
             "setup_screen": "Screen visible to the recorder", "setup_screen_hint": "ffmpeg did not find the screen. Restart the Mac and check again.",
             "setup_screen_permission": "Screen Recording permission", "setup_screen_permission_hint": "In Settings, turn on \"Ipsio\" in the list. The app closes once the permission is in and comes back by itself (if it does not, open Ipsio again).",
-            "setup_mic_permission": "Microphone permission", "setup_mic_permission_hint": "Computer sound comes in through BlackHole, which macOS treats as a microphone; and meetings record your voice.",
-            "setup_microphone": "Microphone for meeting mode", "setup_microphone_hint": "Pick the real microphone in Sound > Input, or switch to class mode in the menu.",
+            "setup_mic_permission": "Microphone permission", "setup_mic_permission_hint": "Meetings record your voice.",
+            "setup_microphone": "Microphone for meeting mode", "setup_microphone_hint": "The Mac has no sound input. Connect a microphone, or switch to class mode in the menu.",
             "setup_folder": "Recordings folder", "setup_folder_hint": "Could not create the folder. Pick another one.",
             "setup_disk": "Disk space", "setup_disk_hint": "Low on space: an hour of recording takes about 2 GB. Free some space or pick a folder on another disk.",
-            "setup_other": "Another item", "setup_other_hint": "ipsio.sh reported an item this window does not know yet. Run ipsio doctor in Terminal to see which.",
+            "setup_other": "Another item", "setup_other_hint": "The recorder reported an item this window does not know yet. Update Ipsio.",
             "setup_calendar": "Calendar (optional)", "setup_calendar_hint": "Connect your calendar so Ipsio records meetings by itself.",
             "fix_install": "Install", "fix_create": "Create", "fix_settings": "Open Settings", "fix_allow": "Allow",
             "fix_sound": "Open Sound", "fix_folder": "Choose folder", "fix_calendar": "Connect",
@@ -336,7 +335,6 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             center.requestAuthorization(options: [.alert, .sound]) { ok, _ in DispatchQueue.main.async { self.notificationsOk = ok } }
         }
         MacCalendar.install()
-        restoreSoundIfStuck()
         skipped = Set(((try? String(contentsOfFile: skipPath, encoding: .utf8)) ?? "").components(separatedBy: "\n").filter { !$0.isEmpty })
         meetings = Sources(dir: dir, conf: readConf()).readCache()
         refresh()
@@ -369,16 +367,17 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
 
     func micOk() -> Bool { AVCaptureDevice.authorizationStatus(for: .audio) == .authorized }
 
-    /// The app's preflight, before the script's: the two permissions only the
-    /// Mac's screen can grant. Without the microphone one not even CLASS mode
-    /// records sound (BlackHole is an audio input to macOS). Returns false and
-    /// explains, without recording.
-    func permissionsOk(explain: Bool) -> Bool {
+    /// The app's preflight, before the engine's: the permissions only the
+    /// Mac's screen can grant. The microphone only matters in a meeting: the
+    /// computer sound comes from ScreenCaptureKit, not from an audio input.
+    /// Returns false and explains, without recording.
+    func permissionsOk(explain: Bool, meeting: Bool) -> Bool {
         if !CGPreflightScreenCaptureAccess() {
             CGRequestScreenCaptureAccess()
             if explain { alert(t("no_perm_title"), t("no_perm_body")) }
             return false
         }
+        guard meeting else { return true }
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: return true
         case .notDetermined:
@@ -424,7 +423,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         recentMenu.removeAllItems()
         let fm = FileManager.default
         let urls = ((try? fm.contentsOfDirectory(at: URL(fileURLWithPath: currentFolder()), includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey])) ?? [])
-            .filter { $0.pathExtension.lowercased() == "mkv" }
+            .filter { ["mov", "mkv"].contains($0.pathExtension.lowercased()) }   // mkv: recordings of the script engine
             .sorted { (a, b) in
                 let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
                 let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
@@ -485,16 +484,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     }
 
     // ---- script ----
-    /// With a deadline: a wedged ffmpeg (device enumeration, a hung
-    /// screencapture) used to hold "busy" forever, and with it every calendar
-    /// start and stop. check decodes the whole file, so it gets longer.
-    func run(_ cmd: String, env: [String: String] = [:]) -> String {
-        let limit: TimeInterval = cmd == "check" ? 1800 : 180
-        let r = Runner.run("/bin/bash", [script, cmd], env: env.isEmpty ? nil : ProcessInfo.processInfo.environment.merging(env) { _, b in b }, limit: limit)
-        if let e = r.launchError { return "COULD NOT RUN THE SCRIPT\n\(script): \(e)" }
-        if r.timedOut { return t("script_timeout_title") + "\n" + t("script_timeout_body", cmd, String(Int(limit))) + "\n#state verdict=TIMEOUT" }
-        return r.out
-    }
+    /// The engine, in the script's output format. Blocking: call it off the
+    /// main thread (start waits for ScreenCaptureKit, at most 30 s).
+    func run(_ cmd: String, env: [String: String] = [:]) -> String { backend.run(cmd, env: env) }
     // Splits the script output into: title (first line), body (the rest,
     // without the machine line) and the dictionary of the "#state key=value ..." line.
     struct Output { let title: String; let body: String; let state: [String: String] }
@@ -521,27 +513,11 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         return Output(title: title, body: body, state: st)
     }
 
-    func savedPid() -> Int32? {
-        guard let s = try? String(contentsOfFile: pidPath, encoding: .utf8),
-              let pid = Int32(s.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
-        return pid
-    }
-    /// Alive AND an ffmpeg (same rule as is_recorder in ipsio.sh): after a
-    /// power cut the pid file survives and its number may belong to anything.
-    func isRecorder(_ pid: Int32) -> Bool {
-        guard kill(pid, 0) == 0 else { return false }
-        var buf = [CChar](repeating: 0, count: 4096)
-        guard proc_pidpath(pid, &buf, UInt32(buf.count)) > 0 else { return false }
-        return String(cString: buf).contains("ffmpeg")
-    }
-    func recording() -> Bool { guard let pid = savedPid() else { return false }; return isRecorder(pid) }
-    // Pid file present and no recorder behind it: the recorder stopped without
-    // "stop" (stop deletes the pid file). That is the watcher's signal.
-    func diedByItself() -> Bool { guard let pid = savedPid() else { return false }; return !isRecorder(pid) }
-    func currentFile() -> String? {
-        guard let a = try? String(contentsOfFile: dir + "/file", encoding: .utf8) else { return nil }
-        return a.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
+    func recording() -> Bool { backend.recording }
+    // The watcher's signal: macOS stopped the capture, or a recording of a
+    // previous run was left with nothing capturing it (see Backend).
+    func diedByItself() -> Bool { backend.diedByItself }
+    func currentFile() -> String? { backend.currentFile }
 
     func icon(_ name: String, color: NSColor?) {
         if let color = color {
@@ -563,7 +539,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         let on = recording()
         if !on {
             icon("record.circle", color: nil)
-            statusItem.title = !CGPreflightScreenCaptureAccess() ? t("stopped_no_perm") : (!micOk() ? t("stopped_no_mic") : t("stopped"))
+            statusItem.title = !CGPreflightScreenCaptureAccess() ? t("stopped_no_perm") : (mode == "meeting" && !micOk() ? t("stopped_no_mic") : t("stopped"))
         }
         recordItem.isEnabled = !on && !busy; stopItem.isEnabled = on && !busy; checkItem.isEnabled = on; testItem.isEnabled = !on && !busy
         recordItem.title = t("record"); stopItem.title = t("stop"); checkItem.title = t("check"); testItem.title = busy && !on ? t("testing") : t("test")
@@ -574,6 +550,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         doctorItem.title = t("doctor"); doctorItem.isEnabled = !busy
         connectItem.title = Sources(dir: dir, conf: readConf()).configured.contains { $0 == "ics" || $0 == "macos" } ? t("connect_again") : t("connect")
         languageItem.title = t("language"); restartItem.title = t("restart"); quitItem.title = t("quit")
+        // The recording lives in this process now: restarting would cut it.
+        restartItem.isEnabled = !on && !busy
         let c = readConf()
         let title = c["TITLE"] ?? ""
         titleItem.title = t("title", title.isEmpty ? t("no_title") : title)
@@ -607,10 +585,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         if busy { return }
         if diedByItself() {
             let log = logTail()
-            try? FileManager.default.removeItem(atPath: pidPath)   // a single alert
-            busy = true
+            busy = true                                            // a single alert: stop clears the signal
             DispatchQueue.global().async {
-                _ = self.run("stop")                               // gives the sound back
+                _ = self.run("stop")                               // closes the file, writes the .sha256
                 DispatchQueue.main.async {
                     self.busy = false; self.refresh()
                     if let m = self.readMarker() {
@@ -675,21 +652,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         }
     }
 
-    func logTail() -> String {
-        guard let s = try? String(contentsOfFile: logPath, encoding: .utf8) else { return t("no_log") }
-        let lines = s.replacingOccurrences(of: "\r", with: "\n").components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-        return lines.suffix(4).joined(separator: "\n")
-    }
-
-    // If the app or the Mac went down mid-recording, the system output stays
-    // stuck on Ipsio's device and sound "vanishes" with no explanation. The
-    // script's stop gives the speakers back even with nothing recording.
-    func restoreSoundIfStuck() {
-        if recording() { return }
-        let output = run("output").trimmingCharacters(in: .whitespacesAndNewlines)
-        let device = run("device").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !output.isEmpty && output == device { _ = run("stop") }
-    }
+    func logTail() -> String { backend.whyItDied ?? t("no_log") }
 
     /// Every popup the app opens on its own goes through here. NSAlert.runModal
     /// inside a DispatchQueue.main block holds the main queue (it is serial)
@@ -802,7 +765,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     }
 
     func startCalendar(_ e: Meeting) {
-        if !permissionsOk(explain: !failureAlerted.contains(e.id)) {
+        if !permissionsOk(explain: !failureAlerted.contains(e.id), meeting: readConf()["CALENDAR_MODE"] != "class") {
             calendarFailure[e.id] = Date(); failureAlerted.insert(e.id); return
         }
         busy = true; refresh()
@@ -857,7 +820,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
 
     // ---- actions ----
     @objc func doRecord() {
-        guard permissionsOk(explain: true) else { refresh(); return }
+        guard permissionsOk(explain: true, meeting: mode == "meeting") else { refresh(); return }
         alarmGiven = false; micAlarmGiven = false
         busy = true; refresh()
         DispatchQueue.global().async {
@@ -900,7 +863,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         // A second click (or Return in the setup window) during a test would
         // finish fast with ALREADY_RECORDING and clear busy under the first one.
         guard !busy else { return }
-        guard permissionsOk(explain: true) else { refresh(); return }
+        guard permissionsOk(explain: true, meeting: mode == "meeting") else { refresh(); return }
         busy = true; refresh()
         statusItem.title = t("testing")
         DispatchQueue.global().async {
@@ -1102,6 +1065,11 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         var c = readConf(); c["UI_LANGUAGE"] = lang == "pt" ? "en" : "pt"; writeConf(c); refresh()
     }
     @objc func doRestart() { NSApp.terminate(nil) }
+    /// Quit, logout or shutdown mid-recording: close the file and write its
+    /// .sha256 before going (without this, it would only be found on the next launch).
+    func applicationWillTerminate(_ n: Notification) {
+        if recording() { _ = run("stop") }
+    }
     @objc func doQuit() {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/launchctl")

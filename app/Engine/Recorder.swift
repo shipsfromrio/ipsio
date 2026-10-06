@@ -23,6 +23,13 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudio
         let complete: Bool             // the writer closed the file normally
         let dropped: Int
     }
+    struct Snapshot {
+        let level: Level
+        let system: [Float], mic: [Float]?   // one sample per second, dB
+        let seconds: Double
+        let meterAge: Double                 // seconds since the last computer-sound sample
+        let file: String
+    }
     enum Failure: Error, CustomStringConvertible {
         case noDisplay, noPermission, folder(String), writer(String), start(String), alreadyRecording
         var description: String {
@@ -146,8 +153,36 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudio
     func stream(_ s: SCStream, didStopWithError error: Error) { q.async { self.stoppedByItself = error } }
 
     /// What the app's alarm reads every few seconds.
-    func level() -> Level? {
-        q.sync { writer == nil ? nil : Level.of(system: system, mic: mic, now: Recorder.now(), start: startHost) }
+    func level() -> Level? { snapshot()?.level }
+
+    /// Everything "level" and "check" report, read in one go on the queue.
+    func snapshot() -> Snapshot? {
+        q.sync {
+            guard writer != nil, let f = file else { return nil }
+            let now = Recorder.now()
+            return Snapshot(level: Level.of(system: system, mic: mic, now: now, start: startHost),
+                            system: system.samples, mic: mic?.samples, seconds: now - startHost,
+                            meterAge: system.age(now: now, recordingStart: startHost), file: f)
+        }
+    }
+
+    /// start() for a caller that may block (the app's background queue).
+    func startAndWait(_ o: Options, timeout: Double = 30) -> Result<String, Failure> {
+        let g = DispatchSemaphore(value: 0), lock = NSLock()
+        var r: Result<String, Failure>?, late = false
+        start(o) { res in
+            lock.lock(); let abandoned = late; r = res; lock.unlock()
+            // An answer after the deadline: nobody is waiting for that recording.
+            if abandoned, case .success = res { _ = self.stop() }
+            g.signal()
+        }
+        if g.wait(timeout: .now() + timeout) == .timedOut {
+            lock.lock(); late = true; lock.unlock()
+            _ = stop()
+            return .failure(.start("no answer from ScreenCaptureKit in \(Int(timeout)) s"))
+        }
+        lock.lock(); defer { lock.unlock() }
+        return r!
     }
 
     /// Idempotent: a second stop finds nothing and returns nil, so it can
@@ -158,7 +193,8 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudio
             let s = stream; writer = nil; stream = nil; file = nil
             return (w, s, p)
         }) else { return nil }
-        if let s = s { let g = DispatchSemaphore(value: 0); s.stopCapture { _ in g.signal() }; g.wait() }
+        // Bounded: a wedged capture must not hold the file (and the app) forever.
+        if let s = s { let g = DispatchSemaphore(value: 0); s.stopCapture { _ in g.signal() }; _ = g.wait(timeout: .now() + 10) }
         micSession?.stopRunning(); micSession = nil
         let (sys, m, start, last) = q.sync { (system.samples, mic?.samples, w.sessionStart, lastPTS) }
         let complete = w.finish()

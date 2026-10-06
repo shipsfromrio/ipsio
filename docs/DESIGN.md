@@ -125,4 +125,36 @@ wave, plus a child process that dies mid-file) and 10 engine mutants in
 -30 dB, 0 dropped), 15 s class (`shasum -c` OK), 25 s of silence (the level
 said NO_SOUND from the 4th second; the summary said SILENT 100%).
 
-Next: the app calls the engine instead of `ipsio.sh` (phase 2).
+### Engine, phase 2: the app records natively (05/10/2026, branch `engine-app`)
+
+`app/Engine/Backend.swift` answers `run("start")`, `run("stop")`, `level`,
+`check`, `test`, `doctor`, `folder`, `microphone` in the script's own format
+(title line, body, `#state ... file=` last), with the texts of `ipsio.sh`
+ported to `Texts.swift`. So `Ipsio.swift` kept its alarm, calendar, setup
+window and parser; only `run()`, `recording()`, `diedByItself()` and
+`currentFile()` now point at the backend. No BlackHole, no output device, no
+sound output switched and given back; class mode no longer needs the
+microphone permission.
+
+What changed by moving the recording into the app's process:
+
+- The recording now dies with the app (before, ffmpeg outlived an app
+  restart). The fragmented `.mov` keeps everything up to the last 2 s; the
+  `file` record in the state folder survives, and on the next launch the
+  watchdog reads it as "stopped by itself", closes the books (`.sha256`,
+  SAVED with no measure) and the calendar records again. Quit, logout and
+  shutdown run `stop` first (`applicationWillTerminate`); "Restart the app" is
+  greyed out while recording.
+- `check` no longer decodes the file: it reads the meter's samples (the power
+  average of the recording so far, and the peak), in no time.
+- The hook (`POST_RECORDING`) runs only in the GPL build: compiled with
+  `-D STORE`, `Host.hook` is nil.
+
+Bench `tests/BackendTests.swift` (92 checks, a fake capture and a fake Mac:
+every verdict, the `#state` keys the app reads, the crash left behind, the
+test take that leaves nothing, the doctor read by `Setup.items`) and 10
+backend mutants. `tools/NativeCLI.swift` builds `ipsio-native`, the backend
+from Terminal. On the Mac: doctor complete; a 12 s meeting said NO_SOUND with
+the microphone live at -35 dB, saved SILENT 100% with `shasum -c` OK; `test`
+caught the spoken sentence at -25.5 dB and left nothing behind; the app
+launched and its setup window read the native doctor as complete.
