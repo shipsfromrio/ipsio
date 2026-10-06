@@ -160,7 +160,20 @@ O microfone da reunião é a entrada padrão do sistema: escolha em Ajustes do
 Sistema, Som, Entrada. `CALENDAR_COMMAND` e `POST_RECORDING` só existem na
 versão compilada deste repositório; a edição da App Store não roda comandos.
 
-### Depois de cada gravação
+### Transcrição
+
+Neste Mac, nunca num servidor. Em **Gravações recentes**, cada gravação tem
+**Transcrever**; ou marque **Transcrever cada gravação ao parar**
+(`TRANSCRIBE_AFTER_STOP='1'`). Ao lado do vídeo saem `.txt`
+(`[HH:MM:SS] Me: ...`), `.srt` e `.md`, com quem falou tirado das faixas: o
+microfone é "Me" (você), o computador é "Others" (os outros). O macOS 26 usa
+o SpeechAnalyzer (o primeiro uso de um idioma baixa o modelo dele; nenhum
+áudio sai do Mac); do 13 ao 25, o SFSpeechRecognizer no aparelho, e um
+idioma sem modelo local ali é recusado, nunca mandado para a rede. O vídeo e
+o `.sha256` só são lidos. No Terminal:
+`ipsio-transcribe <arquivo.mov> [pt|en]` (`tools/TranscribeCLI.swift`).
+
+## Depois de cada gravação
 
 Toda gravação salva ganha, ao lado, um arquivo `.sha256` no formato que o
 `shasum -a 256 -c` confere: prova de que o arquivo não foi alterado depois.
@@ -220,9 +233,8 @@ para o driver e para recarregar o áudio). Depois,
 
 ## Depois
 
-Transcrição com quem falou o quê (usando as faixas separadas) e faxina de
-disco (apagar o vídeo depois de N dias, guardando áudio e transcrição) estão
-desenhadas em [`docs/DESIGN.md`](docs/DESIGN.md), ainda sem código.
+Faxina de disco (apagar o vídeo depois de N dias, guardando áudio e
+transcrição) está desenhada em [`docs/DESIGN.md`](docs/DESIGN.md), ainda sem código.
 
 ## Desenvolver
 

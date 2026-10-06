@@ -75,6 +75,7 @@ func fixture(conf: [String: String] = [:]) -> (Backend, FakeCapture, String) {
     h.screenPermission = { true }; h.microphone = { "Desk Mic" }; h.freeGB = { _ in 500 }; h.onBattery = { false }
     h.duration = { _ in 125 }; h.tracks = { _ in (1, 1) }; h.say = { _ in }; h.sleep = { _ in }
     h.systemLanguage = { "en" }; h.hook = nil
+    h.background = { $0() }   // in place: "no evidence" is then a fact, not a race
     let constC = c
     return (Backend(dir: dir, capture: cap, host: h, conf: { constC }), cap, folder)
 }

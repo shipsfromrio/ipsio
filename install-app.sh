@@ -56,6 +56,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSHighResolutionCapable</key><true/>
   <key>NSCalendarsFullAccessUsageDescription</key><string>Ipsio reads your meetings from the Calendar app to record them at the right time. Nothing leaves the Mac. / O Ipsio lê as reuniões do app Calendário para gravá-las na hora certa. Nada sai do Mac.</string>
   <key>NSCalendarsUsageDescription</key><string>Ipsio reads your meetings from the Calendar app to record them at the right time. Nothing leaves the Mac. / O Ipsio lê as reuniões do app Calendário para gravá-las na hora certa. Nada sai do Mac.</string>
+  <key>NSSpeechRecognitionUsageDescription</key><string>Ipsio transcribes your recordings on this Mac, never on a server. / O Ipsio transcreve as suas gravações neste Mac, nunca num servidor.</string>
   <key>NSMicrophoneUsageDescription</key><string>In meeting mode, Ipsio records your voice in its own track. It stays on this Mac. / No modo reunião, o Ipsio grava a sua voz numa faixa própria. Ela fica neste Mac.</string>
 </dict></plist>
 PLIST
@@ -77,7 +78,7 @@ echo "== building =="
 # Into a temporary folder first: a failed build must not leave the KeepAlive
 # LaunchAgent pointing at a deleted binary.
 B=$(mktemp -d)
-swiftc -O -parse-as-library app/Schedule.swift app/MacCalendar.swift app/Setup.swift app/SetupWindow.swift app/Engine/*.swift app/Store/*.swift app/Ipsio.swift -framework AppKit -o "$B/Ipsio" 2>&1 | grep -v warning || true
+swiftc -O -parse-as-library app/Schedule.swift app/MacCalendar.swift app/Setup.swift app/SetupWindow.swift app/Engine/*.swift app/Store/*.swift app/Transcribe/*.swift app/Ipsio.swift -framework AppKit -o "$B/Ipsio" 2>&1 | grep -v warning || true
 swiftc -O -parse-as-library app/Schedule.swift app/MacCalendar.swift app/CalendarCLI.swift -o "$B/ipsio-calendar" 2>&1 | grep -v warning || true
 [ -x "$B/Ipsio" ] && [ -x "$B/ipsio-calendar" ] || { rm -rf "$B"; echo "build failed; the installed app was left as it was"; exit 1; }
 rm -f "$APP/Contents/MacOS/create-device"   # the native engine needs no output device

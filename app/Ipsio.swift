@@ -124,6 +124,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "perm_screen": "Gravação de Tela…", "perm_mic": "Microfone…",
             "mode": "Modo: %@", "mode_class": "Aula (só o som do computador)", "mode_meeting": "Reunião (som do computador + seu microfone)",
             "mode_meeting_mic": "Reunião (som do computador + %@)", "class": "Aula", "meeting": "Reunião",
+            "show_finder": "Mostrar no Finder", "transcribe": "Transcrever", "transcribe_again": "Transcrever de novo",
+            "transcribing": "Transcrevendo…", "open_transcript": "Abrir a transcrição",
+            "transcribe_auto": "Transcrever cada gravação ao parar", "transcribed_title": "Transcrição pronta",
+            "transcribe_failed": "A transcrição não foi feita",
             "login": "Abrir ao iniciar a sessão", "login_failed": "O macOS não aceitou o item de login",
             "language": "Switch to English  🇺🇸", "restart": "Reiniciar o app", "quit": "Sair (até o próximo login)",
             "waiting": "Aguardando a permissão de Gravação de Tela…",
@@ -200,6 +204,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "perm_screen": "Screen Recording…", "perm_mic": "Microphone…",
             "mode": "Mode: %@", "mode_class": "Class (computer sound only)", "mode_meeting": "Meeting (computer sound + your microphone)",
             "mode_meeting_mic": "Meeting (computer sound + %@)", "class": "Class", "meeting": "Meeting",
+            "show_finder": "Show in Finder", "transcribe": "Transcribe", "transcribe_again": "Transcribe again",
+            "transcribing": "Transcribing…", "open_transcript": "Open the transcript",
+            "transcribe_auto": "Transcribe each recording on stop", "transcribed_title": "Transcript ready",
+            "transcribe_failed": "The transcription was not made",
             "login": "Open at login", "login_failed": "macOS refused the login item",
             "language": "Mudar para português  🇧🇷", "restart": "Restart the app", "quit": "Quit (until next login)",
             "waiting": "Waiting for the Screen Recording permission…",
@@ -437,8 +445,56 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         if urls.isEmpty { let v = NSMenuItem(title: t("none"), action: nil, keyEquivalent: ""); v.isEnabled = false; recentMenu.addItem(v) }
         for u in urls {
             let size = (try? u.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-            let mi = NSMenuItem(title: "\(u.lastPathComponent)  ·  \(String(format: "%.1f GB", Double(size) / 1_073_741_824))", action: #selector(doOpenRecent(_:)), keyEquivalent: "")
-            mi.target = self; mi.representedObject = u; recentMenu.addItem(mi)
+            let mi = NSMenuItem(title: "\(u.lastPathComponent)  ·  \(String(format: "%.1f GB", Double(size) / 1_073_741_824))", action: nil, keyEquivalent: "")
+            let sub = NSMenu(); sub.autoenablesItems = false
+            let show = NSMenuItem(title: t("show_finder"), action: #selector(doOpenRecent(_:)), keyEquivalent: "")
+            show.target = self; show.representedObject = u; sub.addItem(show)
+            let done = FileManager.default.fileExists(atPath: u.deletingPathExtension().path + ".txt")
+            let busyHere = transcribing.contains(u.path)
+            let tr = NSMenuItem(title: busyHere ? t("transcribing") : (done ? t("transcribe_again") : t("transcribe")),
+                                action: #selector(doTranscribe(_:)), keyEquivalent: "")
+            // Not during a recording: the capture comes first.
+            tr.target = self; tr.representedObject = u; tr.isEnabled = !busyHere && !recording()
+            sub.addItem(tr)
+            if done {
+                let open = NSMenuItem(title: t("open_transcript"), action: #selector(doOpenTranscript(_:)), keyEquivalent: "")
+                open.target = self; open.representedObject = u; sub.addItem(open)
+            }
+            mi.submenu = sub; recentMenu.addItem(mi)
+        }
+        recentMenu.addItem(.separator())
+        let auto = NSMenuItem(title: t("transcribe_auto"), action: #selector(doTranscribeAuto), keyEquivalent: "")
+        auto.target = self; auto.state = readConf()["TRANSCRIBE_AFTER_STOP"] == "1" ? .on : .off
+        recentMenu.addItem(auto)
+    }
+
+    // ---- transcription (app/Transcribe): on this Mac, never on a server ----
+    var transcribing = Set<String>()
+    @objc func doTranscribe(_ s: NSMenuItem) { if let u = s.representedObject as? URL { transcribe(u.path) } }
+    @objc func doOpenTranscript(_ s: NSMenuItem) {
+        if let u = s.representedObject as? URL { NSWorkspace.shared.open(u.deletingPathExtension().appendingPathExtension("txt")) }
+    }
+    @objc func doTranscribeAuto() {
+        var c = readConf(); c["TRANSCRIBE_AFTER_STOP"] = c["TRANSCRIBE_AFTER_STOP"] == "1" ? "0" : "1"; writeConf(c)
+    }
+    /// Reads the recording only: the .mov and its .sha256 are never written.
+    func transcribe(_ path: String) {
+        guard !transcribing.contains(path) else { return }
+        transcribing.insert(path)
+        let language = lang, name = (path as NSString).lastPathComponent
+        DispatchQueue.global(qos: .utility).async {
+            let outcome: Result<String, Error> = Result {
+                let r = try Transcriber.transcribe(path: path, language: language)
+                let files = try Export.write(r.segments, media: path, language: language)
+                return files.first { $0.hasSuffix(".txt") } ?? path
+            }
+            DispatchQueue.main.async {
+                self.transcribing.remove(path)
+                switch outcome {
+                case .success(let txt): self.notify(self.t("transcribed_title"), name, file: txt)
+                case .failure(let e): self.alert(self.t("transcribe_failed"), name + "\n\n" + "\(e)")
+                }
+            }
         }
     }
     @objc func doOpenRecent(_ s: NSMenuItem) {
@@ -830,6 +886,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     }
 
     func showStop(_ s: Output, file: String?) {
+        if s.state["verdict"] == "SAVED", readConf()["TRANSCRIBE_AFTER_STOP"] == "1", let f = s.state["file"] { transcribe(f) }
         // Saved clean: a notification (a click shows it in Finder). Silent, with
         // gaps, dead microphone or not opening: a popup, because it asks for a decision.
         let sound = s.state["sound"] ?? ""

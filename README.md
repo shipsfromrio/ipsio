@@ -217,11 +217,23 @@ To set it up: `bash install.sh --with-script` (Homebrew required; asks for the
 password for the driver and an audio reload). Then
 `ipsio start | stop | level | check | status | test | doctor`.
 
+## Transcription
+
+On this Mac, never on a server. In **Recent recordings**, each recording has
+**Transcribe**; or tick **Transcribe each recording on stop**
+(`TRANSCRIBE_AFTER_STOP='1'`). Next to the video come `.txt`
+(`[HH:MM:SS] Me: ...`), `.srt` and `.md`, with who spoke taken from the
+tracks: the microphone is "Me", the computer is "Others". macOS 26 uses
+SpeechAnalyzer (the first use of a language downloads its model, no audio
+leaves the Mac); macOS 13 to 25 use on-device SFSpeechRecognizer, and a
+language with no on-device model there is refused, never sent to the
+network. The video and its `.sha256` are only read. From Terminal:
+`ipsio-transcribe <file.mov> [pt|en]` (`tools/TranscribeCLI.swift`).
+
 ## Next
 
-Transcription with who said what (using the separate tracks) and disk cleanup
-(deleting the video after N days, keeping audio and transcript) are designed
-in [`docs/DESIGN.md`](docs/DESIGN.md), with no code yet.
+Disk cleanup (deleting the video after N days, keeping audio and transcript)
+is designed in [`docs/DESIGN.md`](docs/DESIGN.md), with no code yet.
 
 ## Develop
 

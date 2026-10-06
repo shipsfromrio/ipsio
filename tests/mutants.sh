@@ -107,6 +107,25 @@ store_mutant "latest first launch wins" 'let first = firsts.min() ?? now' 'let f
 store_mutant "defaults ignored (deleting the file resets the trial)" 'let firsts = [f.first, defaultsDate(Self.firstKey)].compactMap { $0 }' 'let firsts = [f.first].compactMap { $0 }'
 store_mutant "last seen not persisted" 'let seen = max(seens.max() ?? now, now)' 'let seen = now'
 store_mutant "trial blocks recording" 'if case .expired = s { return false }' 'if case .trial = s { return false }'
+# Transcription: the windows, the overlap and who is speaking.
+transcribe_mutant() { # <file in app/Transcribe> <name> <original text> <broken text>
+  rm -rf "$T/Transcribe"; cp -R "$ROOT/app/Transcribe" "$T/Transcribe"
+  python3 - "$ROOT/app/Transcribe/$1" "$T/Transcribe/$1" "$3" "$4" <<'PY' || { echo "ERROR: the snippet for mutant '$2' is no longer in $1"; ALIVE=$((ALIVE+1)); return; }
+import sys
+src, dst, a, b = sys.argv[1:5]
+s = open(src, encoding="utf-8").read()
+if a not in s: sys.exit(1)
+open(dst, "w", encoding="utf-8").write(s.replace(a, b, 1))
+PY
+  if ! swiftc -parse-as-library "$T"/Transcribe/*.swift "$ROOT/tests/TranscribeTests.swift" -o "$T/tr" 2>"$T/err"; then
+    echo "ERROR: mutant '$2' does not compile"; tail -3 "$T/err"; ALIVE=$((ALIVE+1)); return; fi
+  if "$T/tr" >/dev/null 2>&1; then echo "SURVIVED: $2"; ALIVE=$((ALIVE+1)); else echo "killed: $2"; fi
+}
+transcribe_mutant Transcript.swift "windows do not overlap" 'start += length - overlap' 'start += length'
+transcribe_mutant Transcript.swift "the overlap keeps words twice" 'let lo = i == 0 ? -Double.infinity : w.start + overlap / 2' 'let lo = i == 0 ? -Double.infinity : w.start'
+transcribe_mutant Transcript.swift "the microphone is the others" 'case (2, 1), (3, 2): return .me' 'case (2, 1), (3, 2): return .others'
+transcribe_mutant Transcript.swift "the script's mix is transcribed" 'case (1, 0), (2, 0), (3, 1): return .others' 'case (1, 0), (2, 0), (3, 0), (3, 1): return .others'
+transcribe_mutant Export.swift "a transcript may overwrite the evidence" 'if kinds.contains(ext) || ext == "sha256" { throw Failure.refused(media) }' ''
 echo
 [ "$ALIVE" -eq 0 ] && echo "all mutants killed" || echo "$ALIVE mutant(s) alive"
 [ "$ALIVE" -eq 0 ]

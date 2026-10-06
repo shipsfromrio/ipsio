@@ -84,19 +84,13 @@ E também:
 O Ipsio grava o que acontece neste Mac. Gravar outras pessoas pode exigir o
 consentimento delas onde você está: avise os participantes antes de gravar.
 
-## Novidades (versão 1.0)
-
-Primeira versão na App Store: tela e som do sistema gravados de forma nativa,
-gravação automática pela agenda, faixas separadas para você e para os outros,
-alarme de silêncio ao vivo e impressão digital SHA-256 para cada gravação.
-
-## Guardado até sair
-
-A Apple recusa ficha que descreve recurso que a versão enviada não tem. Quando
-a transcrição no próprio Mac estiver na versão enviada, acrescente à
-descrição, depois de TELA E SOM EM FAIXAS SEPARADAS:
-
 TRANSCRIÇÃO NO SEU MAC
 Cada gravação vira uma transcrição com quem falou: você pela faixa do
 microfone, os outros pela faixa do computador. A fala é reconhecida neste Mac,
 nunca num servidor.
+
+## Novidades (versão 1.0)
+
+Primeira versão na App Store: tela e som do sistema gravados de forma nativa,
+gravação automática pela agenda, faixas separadas para você e para os outros,
+alarme de silêncio ao vivo e impressão digital SHA-256 para cada gravação. Transcrição com quem falou, feita neste Mac.

@@ -61,6 +61,8 @@ struct Host {
         _ = run([lang == "pt" ? "teste de gravação: um, dois, três, quatro, cinco" : "recording test: one, two, three, four, five"])
     }
     var sleep: (Double) -> Void = { Thread.sleep(forTimeInterval: $0) }
+    /// Where the evidence and the hook run: off the caller's thread (the bench runs it in place).
+    var background: (@escaping () -> Void) -> Void = { DispatchQueue.global(qos: .utility).async(execute: $0) }
     var systemLanguage: () -> String = { (Locale.preferredLanguages.first ?? "en").hasPrefix("pt") ? "pt" : "en" }
     /// Runs the POST_RECORDING hook; only the GPL build has it (the store does not run commands).
     var hook: ((String, String, String) -> Void)? = { command, file, log in
@@ -335,7 +337,7 @@ final class Backend {
     /// never touches the video.
     private func afterSave(_ path: String, _ s: Settings) {
         let hook = host.hook, cmd = s.hookCommand, log = dir + "/post-recording.log"
-        DispatchQueue.global(qos: .utility).async {
+        host.background {
             Evidence.write(for: path)
             if let h = hook, !cmd.isEmpty { h(cmd, path, log) }
         }

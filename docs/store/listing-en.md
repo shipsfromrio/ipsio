@@ -83,19 +83,13 @@ Also:
 Ipsio records what happens on this Mac. Recording other people may require
 their consent where you live: tell the participants before you record.
 
-## What's new (version 1.0)
-
-First release on the App Store: screen and system sound recorded natively,
-automatic recording from your calendar, separate tracks for you and the
-others, a live silence alarm and a SHA-256 fingerprint for every recording.
-
-## Held back until it ships
-
-Apple rejects metadata that describes features the build does not have. When
-on-device transcription is in the submitted build, add to the description,
-after SCREEN AND SOUND IN SEPARATE TRACKS:
-
 TRANSCRIPTION ON YOUR MAC
 Each recording becomes a transcript with who spoke: you from the microphone
 track, the others from the computer track. Speech is recognized on this Mac,
 never on a server.
+
+## What's new (version 1.0)
+
+First release on the App Store: screen and system sound recorded natively,
+automatic recording from your calendar, separate tracks for you and the
+others, a live silence alarm and a SHA-256 fingerprint for every recording. Transcripts with who spoke, made on this Mac.
