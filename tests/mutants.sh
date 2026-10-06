@@ -126,6 +126,40 @@ transcribe_mutant Transcript.swift "the overlap keeps words twice" 'let lo = i =
 transcribe_mutant Transcript.swift "the microphone is the others" 'case (2, 1), (3, 2): return .me' 'case (2, 1), (3, 2): return .others'
 transcribe_mutant Transcript.swift "the script's mix is transcribed" 'case (1, 0), (2, 0), (3, 1): return .others' 'case (1, 0), (2, 0), (3, 0), (3, 1): return .others'
 transcribe_mutant Export.swift "a transcript may overwrite the evidence" 'if kinds.contains(ext) || ext == "sha256" { throw Failure.refused(media) }' ''
+# Meeting detection and search: one file of app/ against its own bench.
+app_mutant() { # <file in app> <bench in tests> <name> <original text> <broken text>
+  python3 - "$ROOT/app/$1" "$T/$1" "$4" "$5" <<'PY' || { echo "ERROR: the snippet for mutant '$3' is no longer in $1"; ALIVE=$((ALIVE+1)); return; }
+import sys
+src, dst, a, b = sys.argv[1:5]
+s = open(src, encoding="utf-8").read()
+if a not in s: sys.exit(1)
+open(dst, "w", encoding="utf-8").write(s.replace(a, b, 1))
+PY
+  if ! swiftc -parse-as-library "$T/$1" "$ROOT/tests/$2" -o "$T/a" 2>"$T/err"; then
+    echo "ERROR: mutant '$3' does not compile"; tail -3 "$T/err"; ALIVE=$((ALIVE+1)); return; fi
+  if "$T/a" >/dev/null 2>&1; then echo "SURVIVED: $3"; ALIVE=$((ALIVE+1)); else echo "killed: $3"; fi
+}
+D=MeetingDetectTests.swift
+app_mutant MeetingDetect.swift $D "Zoom running counts as a meeting" 'if zoom.contains(id) {' 'if zoom.contains(id) { if true { return Meeting(app: "Zoom", key: "zoom") }'
+app_mutant MeetingDetect.swift $D "a Zoom tab name counts (substring, not words)" 'for i in 0...(w.count - p.count) where Array(w[i..<(i + p.count)]) == p { return true }' 'if w.joined(separator: " ").contains(p.joined(separator: " ")) { return true }'
+app_mutant MeetingDetect.swift $D "the Meet home page counts" 'if isBrowser(id), let c = meetCode(title) {' 'if isBrowser(id), words(title).contains("meet") { let c = meetCode(title) ?? "home";'
+app_mutant MeetingDetect.swift $D "a Teams chat counts" 'if ["chat", "calendar", "calendario", "activity", "atividade", "teams", "equipes"].contains(w[0]) { return nil }' ''
+app_mutant MeetingDetect.swift $D "a Slack channel named huddle counts" 'if lead.hasPrefix("huddle"), w[0] == "huddle" {' 'if !lead.isEmpty, w.contains("huddle") {'
+app_mutant MeetingDetect.swift $D "a window of an app not running counts" 'for win in windows where running.contains(win.bundleID) {' 'for win in windows where !running.isEmpty || true {'
+app_mutant MeetingDetect.swift $D "debounce offers twice" 'if handled.contains(m.key) { return nil }' ''
+app_mutant MeetingDetect.swift $D "debounce never forgets" 'lastSeen[k] = nil; handled.remove(k)' 'lastSeen[k] = nil'
+app_mutant MeetingDetect.swift $D "offered while recording" 'return recording || calendarSoon ? nil : m' 'return calendarSoon ? nil : m'
+app_mutant MeetingDetect.swift $D "the calendar margin is ignored" 'now >= $0.start.addingTimeInterval(-margin)' 'now >= $0.start'
+D=SearchTests.swift
+app_mutant Search.swift $D "search becomes accent-sensitive" 's.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).lowercased()' 's.lowercased()'
+app_mutant Search.swift $D "OR instead of AND" 'return terms.allSatisfy { f.contains($0) }' 'return terms.contains { f.contains($0) }'
+app_mutant Search.swift $D "the limit is ignored" 'out.append(h.element)
+                if out.count >= limit { return out }' 'out.append(h.element)'
+app_mutant Search.swift $D "oldest recording first" '$0.date != $1.date ? $0.date > $1.date' '$0.date != $1.date ? $0.date < $1.date'
+app_mutant Search.swift $D "file names are not searched" 'if matches((name as NSString).deletingPathExtension, q) {' 'if false {'
+app_mutant Search.swift $D "the offset drops the hours" 'return (h * 3600 + m * 60 + s,' 'return (h * 0 + m * 60 + s,'
+app_mutant Search.swift $D "the speaker label is searched" 'guard let p = parse(line), matches(p.text, q) else { continue }' 'guard let p = parse(line), matches(line, q) else { continue }'
+app_mutant Search.swift $D "a hit points at the .txt next to a recording" 'let shown = r.entry.media ?? r.entry.txt!' 'let shown = r.entry.txt ?? r.entry.media!'
 echo
 [ "$ALIVE" -eq 0 ] && echo "all mutants killed" || echo "$ALIVE mutant(s) alive"
 [ "$ALIVE" -eq 0 ]

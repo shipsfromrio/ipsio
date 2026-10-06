@@ -78,7 +78,7 @@ echo "== building =="
 # Into a temporary folder first: a failed build must not leave the KeepAlive
 # LaunchAgent pointing at a deleted binary.
 B=$(mktemp -d)
-swiftc -O -parse-as-library app/Schedule.swift app/MacCalendar.swift app/Setup.swift app/SetupWindow.swift app/Engine/*.swift app/Store/*.swift app/Transcribe/*.swift app/Ipsio.swift -framework AppKit -o "$B/Ipsio" 2>&1 | grep -v warning || true
+swiftc -O -parse-as-library app/Schedule.swift app/MacCalendar.swift app/Setup.swift app/SetupWindow.swift app/MeetingDetect.swift app/Search.swift app/SearchWindow.swift app/Engine/*.swift app/Store/*.swift app/Transcribe/*.swift app/Ipsio.swift -framework AppKit -o "$B/Ipsio" 2>&1 | grep -v warning || true
 swiftc -O -parse-as-library app/Schedule.swift app/MacCalendar.swift app/CalendarCLI.swift -o "$B/ipsio-calendar" 2>&1 | grep -v warning || true
 [ -x "$B/Ipsio" ] && [ -x "$B/ipsio-calendar" ] || { rm -rf "$B"; echo "build failed; the installed app was left as it was"; exit 1; }
 rm -f "$APP/Contents/MacOS/create-device"   # the native engine needs no output device
