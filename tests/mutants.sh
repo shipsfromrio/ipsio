@@ -125,6 +125,10 @@ transcribe_mutant Transcript.swift "windows do not overlap" 'start += length - o
 transcribe_mutant Transcript.swift "the overlap keeps words twice" 'let lo = i == 0 ? -Double.infinity : w.start + overlap / 2' 'let lo = i == 0 ? -Double.infinity : w.start'
 transcribe_mutant Transcript.swift "the microphone is the others" 'case (2, 1), (3, 2): return .me' 'case (2, 1), (3, 2): return .others'
 transcribe_mutant Transcript.swift "the script's mix is transcribed" 'case (1, 0), (2, 0), (3, 1): return .others' 'case (1, 0), (2, 0), (3, 0), (3, 1): return .others'
+transcribe_mutant Transcript.swift "the echo is kept" 'return !others.contains { o in' 'return true || !others.contains { o in'
+transcribe_mutant Transcript.swift "echo ignores time" 'guard o.start - slack <= m.end && m.start <= o.end + slack else { return false }' ''
+transcribe_mutant Transcript.swift "one shared word makes an echo" '/ Double(mine.count) >= share' '> 0'
+transcribe_mutant Transcript.swift "the others can be dropped as echo" 'guard m.speaker == .me else { return true }' ''
 transcribe_mutant Export.swift "a transcript may overwrite the evidence" 'if kinds.contains(ext) || ext == "sha256" { throw Failure.refused(media) }' ''
 # One file of app/ against its own bench (with Files.swift for the evidence hash):
 # meeting detection, search, the consent reminder and the integrity report.

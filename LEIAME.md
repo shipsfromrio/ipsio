@@ -94,7 +94,8 @@ exclamação quando o som (ou o microfone) some por 90 s.
   desconectada, o Ipsio grava a tela principal e avisa. Uma janela vale só
   para a próxima gravação (o ID dela morre com ela); se ela não existir mais
   na hora de começar, nada é gravado e o Ipsio diz o motivo, nunca a tela
-  inteira no lugar.
+  inteira no lugar. Com uma janela, o som do computador é só o do app dela
+  (uma janela do Zoom grava o Zoom, não o aviso de outro app).
 - **Qualidade.** Econômica, Normal ou Alta, com os GB por hora ao lado de
   cada uma (acima). O mínimo de disco livre e as horas que cabem acompanham.
 - **Lembrar de avisar que está gravando** (ligado por padrão). Uma gravação

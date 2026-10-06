@@ -94,7 +94,8 @@ with an exclamation mark when the sound (or the microphone) is gone for 90 s.
   unplugged, Ipsio records the main screen and says so. A window counts for
   the next recording only (its ID dies with the window); if it is gone at the
   start, nothing is recorded and Ipsio says why, never the whole screen in
-  its place.
+  its place. With one window, the computer sound is that window's app only
+  (a Zoom window records Zoom, not a notification from another app).
 - **Quality.** Economy, Normal or High, with the GB per hour next to each
   (above). The minimum free space and the hours left scale with it.
 - **Remind me to announce the recording** (on by default). A recording
