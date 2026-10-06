@@ -15,6 +15,14 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudio
         var fps = 12
         var videoBitrate = 4_000_000
         var target = CaptureTarget.main
+        var micSource = MicSource.auto
+    }
+    /// Where the microphone comes from. `avcapture` forces the macOS 13/14
+    /// path (AVCaptureSession) on 15+, so it can be exercised on a new Mac.
+    enum MicSource: Equatable {
+        case auto, avcapture
+        /// IPSIO_MIC: only the exact word forces; anything else is the default.
+        static func parse(_ s: String?) -> MicSource { s?.trimmingCharacters(in: .whitespaces).lowercased() == "avcapture" ? .avcapture : .auto }
     }
     struct Summary {
         let file: String
@@ -33,7 +41,7 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudio
     }
     enum Failure: Error, CustomStringConvertible {
         case noDisplay, noPermission, folder(String), writer(String), start(String), alreadyRecording
-        case windowGone, windowClosed(String)
+        case windowGone, windowClosed(String), microphone(String)
         var description: String {
             switch self {
             case .noDisplay: return "no display to record"
@@ -44,13 +52,15 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudio
             case .alreadyRecording: return "already recording"
             case .windowGone: return "the chosen window is no longer open"
             case .windowClosed(let s): return "the recorded window was closed, or macOS stopped its capture: \(s)"
+            case .microphone(let s): return "the microphone did not open: \(s)"
             }
         }
     }
 
     private let q = DispatchQueue(label: "ipsio.recorder")
     private var stream: SCStream?
-    private var micSession: AVCaptureSession?
+    private var micSession: AVCaptureSession?   // only touched on q
+    private var micClock: CMClock?              // the session's clock, when it is not the host's
     private var writer: Writer?
     private var system = Meter(), mic: Meter?
     private var startHost: Double = 0
@@ -117,7 +127,7 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudio
             cfg.capturesAudio = true; cfg.excludesCurrentProcessAudio = true
             cfg.sampleRate = 48_000; cfg.channelCount = 2
             var micInStream = false
-            if o.meeting, #available(macOS 15.0, *) { cfg.captureMicrophone = true; micInStream = true }
+            if o.meeting, o.micSource == .auto, #available(macOS 15.0, *) { cfg.captureMicrophone = true; micInStream = true }
             let path = Naming.output(folder: o.folder, date: Date(), title: o.title)
             let w2: Writer
             do { w2 = try Writer(url: URL(fileURLWithPath: path), .init(width: w, height: h, fps: o.fps, videoBitrate: o.videoBitrate, microphone: o.meeting)) }
@@ -128,18 +138,32 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudio
                 try s.addStreamOutput(self, type: .audio, sampleHandlerQueue: self.q)
                 if micInStream, #available(macOS 15.0, *) { try s.addStreamOutput(self, type: .microphone, sampleHandlerQueue: self.q) }
             } catch { done(.failure(.start("\(error)"))); return }
+            // A meeting without its microphone track is not a meeting: fail the
+            // start instead of recording an empty track (fail closed).
+            var session: AVCaptureSession?
+            if o.meeting && !micInStream {
+                switch Recorder.openMic(self, self.q) {
+                case .success(let m): session = m
+                case .failure(let e): _ = w2.finish(); done(.failure(e)); return
+                }
+            }
+            let clock = session.flatMap { Recorder.foreignClock($0.synchronizationClock) }
             self.q.sync {
                 self.writer = w2; self.file = path; self.stream = s
+                self.micSession = session; self.micClock = clock
                 self.system = Meter(); self.mic = o.meeting ? Meter() : nil
                 self.startHost = Recorder.now(); self.lastPTS = .invalid; self.stoppedByItself = nil
                 self.resolvedTarget = resolved
                 if case .window = resolved { self.windowMode = true } else { self.windowMode = false }
             }
-            if o.meeting && !micInStream { self.startMicSession() }
             s.startCapture { e in
                 if let e = e {
-                    self.q.sync { self.writer = nil; self.stream = nil; self.file = nil }
-                    _ = w2.finish(); self.micSession?.stopRunning(); self.micSession = nil
+                    let m = self.q.sync { () -> AVCaptureSession? in
+                        let m = self.micSession
+                        self.writer = nil; self.stream = nil; self.file = nil; self.micSession = nil; self.micClock = nil
+                        return m
+                    }
+                    _ = w2.finish(); m?.stopRunning()
                     done(.failure(.start("\(e)"))); return
                 }
                 done(.success(path))
@@ -157,14 +181,69 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudio
         return Double(mode.pixelWidth) / Double(mode.width)
     }
 
-    /// macOS 13 and 14: the microphone through AVFoundation, on the same queue.
-    private func startMicSession() {
-        guard let dev = AVCaptureDevice.default(for: .audio), let input = try? AVCaptureDeviceInput(device: dev) else { return }
+    /// What the AVCaptureSession microphone hands over: the format the
+    /// stream's microphone and computer sound arrive in on macOS 15+ (float32,
+    /// 48 kHz, stereo), whatever the device is (24-bit USB, 16 kHz Bluetooth).
+    /// AudioEnergy meters it and the AAC writer gets one format on every Mac.
+    static let micPCM: [String: Any] = [
+        AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 48_000, AVNumberOfChannelsKey: 2,
+        AVLinearPCMBitDepthKey: 32, AVLinearPCMIsFloatKey: true,
+        AVLinearPCMIsNonInterleaved: false, AVLinearPCMIsBigEndianKey: false]
+
+    /// Why the microphone session cannot record, or nil when it can. Pure:
+    /// the facts come in, the first broken one is named.
+    static func micProblem(device: Bool, status: AVAuthorizationStatus, inputError: String?, canAdd: Bool, running: Bool) -> String? {
+        if !device { return "the Mac has no sound input" }
+        if status == .denied || status == .restricted { return "no Microphone permission" }
+        if let e = inputError { return e }
+        if !canAdd { return "the input cannot be added to the session" }
+        if !running { return "the session did not run" }
+        return nil
+    }
+
+    /// macOS 13 and 14 (or IPSIO_MIC=avcapture): the microphone through
+    /// AVFoundation, on the recorder's queue. Running, or the reason why not.
+    private static func openMic(_ d: AVCaptureAudioDataOutputSampleBufferDelegate, _ q: DispatchQueue) -> Result<AVCaptureSession, Failure> {
+        let st = AVCaptureDevice.authorizationStatus(for: .audio)
+        func fail(_ device: Bool, _ inputError: String? = nil, canAdd: Bool = true, running: Bool = false) -> Result<AVCaptureSession, Failure> {
+            .failure(.microphone(micProblem(device: device, status: st, inputError: inputError, canAdd: canAdd, running: running) ?? "unknown"))
+        }
+        guard let dev = AVCaptureDevice.default(for: .audio) else { return fail(false) }
+        if st == .denied || st == .restricted { return fail(true) }
+        let input: AVCaptureDeviceInput
+        do { input = try AVCaptureDeviceInput(device: dev) } catch { return fail(true, "\(error)") }
         let s = AVCaptureSession(), out = AVCaptureAudioDataOutput()
-        guard s.canAddInput(input), s.canAddOutput(out) else { return }
+        guard s.canAddInput(input), s.canAddOutput(out) else { return fail(true, canAdd: false) }
         s.addInput(input); s.addOutput(out)
-        out.setSampleBufferDelegate(self, queue: q)
-        s.startRunning(); micSession = s
+        out.audioSettings = micPCM
+        out.setSampleBufferDelegate(d, queue: q)
+        s.startRunning()
+        guard s.isRunning else { s.stopRunning(); return fail(true) }
+        return .success(s)
+    }
+
+    /// The session's clock when it is not the host clock (ScreenCaptureKit
+    /// stamps on the host clock), so its buffers need converting.
+    static func foreignClock(_ c: CMClock?) -> CMClock? {
+        guard let c = c, !CFEqual(c, CMClockGetHostTimeClock()) else { return nil }
+        return c
+    }
+
+    /// A copy of the buffer moved by `d` (every timing entry), or nil.
+    static func shifted(_ sb: CMSampleBuffer, by d: CMTime) -> CMSampleBuffer? {
+        if d == .zero { return sb }
+        var n: CMItemCount = 0
+        guard CMSampleBufferGetSampleTimingInfoArray(sb, entryCount: 0, arrayToFill: nil, entriesNeededOut: &n) == noErr, n > 0 else { return nil }
+        var info = [CMSampleTimingInfo](repeating: CMSampleTimingInfo(), count: n)
+        guard CMSampleBufferGetSampleTimingInfoArray(sb, entryCount: n, arrayToFill: &info, entriesNeededOut: &n) == noErr else { return nil }
+        for i in info.indices {
+            info[i].presentationTimeStamp = info[i].presentationTimeStamp + d
+            if info[i].decodeTimeStamp.isValid { info[i].decodeTimeStamp = info[i].decodeTimeStamp + d }
+        }
+        var out: CMSampleBuffer?
+        guard CMSampleBufferCreateCopyWithNewTiming(allocator: nil, sampleBuffer: sb, sampleTimingEntryCount: n,
+                                                    sampleTimingArray: &info, sampleBufferOut: &out) == noErr else { return nil }
+        return out
     }
 
     // ---- buffers (all on q) ----
@@ -188,7 +267,16 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudio
     }
     func captureOutput(_ o: AVCaptureOutput, didOutput sb: CMSampleBuffer, from c: AVCaptureConnection) {
         guard let w = writer else { return }
-        w.appendMic(sb); if mic != nil { feed(&mic!, sb) }; forward(.mic, sb)
+        var b = sb
+        if let clock = micClock {
+            // The session's clock to the host clock the screen is stamped on.
+            let pts = CMSampleBufferGetPresentationTimeStamp(sb)
+            guard let moved = Recorder.shifted(sb, by: CMSyncConvertTime(pts, from: clock, to: CMClockGetHostTimeClock()) - pts) else {
+                if w.started { w.drop() }; return
+            }
+            b = moved
+        }
+        w.appendMic(b); if mic != nil { feed(&mic!, b) }; forward(.mic, b)
     }
     private func feed(_ m: inout Meter, _ sb: CMSampleBuffer) {
         if let e = AudioEnergy.of(sb) { m.add(sumSquares: e.sumSquares, frames: e.values, at: CMSampleBufferGetPresentationTimeStamp(sb).seconds) }
@@ -244,7 +332,8 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudio
         }) else { return nil }
         // Bounded: a wedged capture must not hold the file (and the app) forever.
         if let s = s { let g = DispatchSemaphore(value: 0); s.stopCapture { _ in g.signal() }; _ = g.wait(timeout: .now() + 10) }
-        micSession?.stopRunning(); micSession = nil
+        let session = q.sync { () -> AVCaptureSession? in let m = micSession; micSession = nil; micClock = nil; return m }
+        session?.stopRunning()
         let (sys, m, start, last) = q.sync { (system.samples, mic?.samples, w.sessionStart, lastPTS) }
         let complete = w.finish()
         let secs = (start != nil && last.isValid) ? (last - start!).seconds : 0

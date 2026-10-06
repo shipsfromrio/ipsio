@@ -71,13 +71,19 @@ struct LicenseTests {
         let file = dir.appendingPathComponent("license")
         let defs = MemoryDefaults()
         let rec = LicenseRecord(file: file, defaults: defs)
+        check(rec.isNew, "never launched: new (the trial terms are shown first)")
         let a = rec.touch(now: t0)
+        check(!rec.isNew, "after the first touch: not new")
         check(a.first == t0 && a.seen == t0, "the first touch is the first launch")
         check(FileManager.default.fileExists(atPath: file.path), "the first launch is written to the file")
         check(defs.d[LicenseRecord.firstKey] as? Date == t0, "the first launch is written to the defaults")
         check(rec.touch(now: t0.addingTimeInterval(2 * day)).first == t0, "a later launch keeps the first launch")
 
         try? FileManager.default.removeItem(at: file)
+        check(!rec.isNew, "deleting the file alone does not make it new (the defaults remember)")
+        let onlyFile = LicenseRecord(file: dir.appendingPathComponent("only-file"), defaults: MemoryDefaults())
+        onlyFile.touch(now: t0)
+        check(!LicenseRecord(file: dir.appendingPathComponent("only-file"), defaults: MemoryDefaults()).isNew, "clearing the defaults alone does not make it new (the file remembers)")
         check(rec.state(now: t0.addingTimeInterval(3 * day), purchased: false, build: .store) == .trial(daysLeft: 4),
               "the file deleted: the defaults keep the trial going")
         check(FileManager.default.fileExists(atPath: file.path), "the deleted file is written back")
@@ -110,12 +116,15 @@ struct LicenseTests {
         // The texts: both languages, every key, title and body, %1 filled.
         check(Set(LicenseTexts.en.keys) == Set(LicenseTexts.pt.keys), "pt and en have the same keys")
         for lang in ["en", "pt"] {
-            for k in ["trial", "trial_one", "expired", "purchased", "purchase_pending", "purchase_failed", "restore_none"] {
+            for k in ["trial", "trial_one", "expired", "purchased", "purchase_pending", "purchase_failed", "restore_none", "notice"] {
                 check(!LicenseTexts.title(k, ["3"], lang: lang).isEmpty && !LicenseTexts.body(k, ["3"], lang: lang).isEmpty,
                       "\(lang) \(k) has a title and a body")
             }
             check(LicenseTexts.title("trial", ["3"], lang: lang).contains("3"), "\(lang) trial title says the days left")
             check(!LicenseTexts.t("menu_buy", ["US$ 19.99"], lang: lang).contains("%1"), "\(lang) buy item has its price")
+            let n = LicenseTexts.body("notice", lang: lang)
+            check(n.contains("7") && (n.contains("App Store")), "\(lang) the trial notice says the length and where the purchase is")
+            check(!LicenseTexts.t("menu_buy_noprice", lang: lang).contains("%1"), "\(lang) buy item without a price has no hole")
             for (k, v) in (lang == "en" ? LicenseTexts.en : LicenseTexts.pt) {
                 check(!v.contains("\u{2014}"), "\(lang) \(k) has no em-dash")
             }

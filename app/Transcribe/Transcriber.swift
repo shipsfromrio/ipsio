@@ -85,7 +85,7 @@ enum Transcriber {
             progress("track \(i + 1) (\(who.rawValue)): \(words.count) words, \(segs.count) lines")
             perTrack.append(segs)
         }
-        return TranscriptResult(segments: Transcript.merge(perTrack), engine: useAnalyzer ? "SpeechAnalyzer" : "SFSpeechRecognizer",
+        return TranscriptResult(segments: Transcript.dropEcho(Transcript.merge(perTrack)), engine: useAnalyzer ? "SpeechAnalyzer" : "SFSpeechRecognizer",
                                 audioSeconds: audio, seconds: Date().timeIntervalSince(t0))
     }
 

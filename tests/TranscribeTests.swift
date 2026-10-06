@@ -155,6 +155,22 @@ struct TranscribeTests {
         check(refused, "an evidence file as the source is refused")
         try? FileManager.default.removeItem(atPath: dir)
 
+        // Echo: the microphone hearing the speakers.
+        let heard = Segment(start: 4, end: 8, speaker: .others, text: "Teste grava é o numeral normal quality normal.")
+        let echo = Segment(start: 4.2, end: 8.1, speaker: .me, text: "Testic grava é o numeral normal quality normal.")
+        let reply = Segment(start: 8.5, end: 10, speaker: .me, text: "Sim, concordo com isso.")
+        let later = Segment(start: 30, end: 34, speaker: .me, text: "grava é o numeral normal quality normal")
+        let e = Transcript.dropEcho([heard, echo, reply, later])
+        check(!e.contains(echo), "the microphone's echo of the others is dropped")
+        check(e.contains(heard), "the others' line is never dropped")
+        check(e.contains(reply), "a reply in other words, right after, is kept")
+        check(e.contains(later), "the same words far from the others' line are kept")
+        let half = Segment(start: 4, end: 8, speaker: .me, text: "teste grava outra coisa bem diferente aqui agora")
+        check(Transcript.dropEcho([heard, half]).contains(half), "a line sharing only a few words is kept")
+        check(Transcript.dropEcho([echo]) == [echo], "with no others' line nothing is dropped")
+        let othersOnly = Segment(start: 4.2, end: 8.1, speaker: .others, text: echo.text)
+        check(Transcript.dropEcho([heard, othersOnly]).count == 2, "two others' lines are both kept")
+
         print("\n\(total - fails)/\(total) ok")
         exit(fails == 0 ? 0 : 1)
     }

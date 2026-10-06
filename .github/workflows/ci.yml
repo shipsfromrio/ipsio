@@ -76,6 +76,8 @@ jobs:
         run: |
           swiftc -parse-as-library app/Report.swift app/Engine/Files.swift tests/ReportTests.swift -o "$RUNNER_TEMP/report-tests"
           "$RUNNER_TEMP/report-tests"
+      - name: macOS 13 guard (newer APIs only behind #available)
+        run: bash tests/availability.sh
       - name: license bench (trial and lifetime purchase)
         run: |
           swiftc -parse-as-library app/Store/License.swift tests/LicenseTests.swift -o "$RUNNER_TEMP/license-tests"

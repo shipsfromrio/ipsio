@@ -106,6 +106,8 @@ store_mutant "clock before first launch grants more than 7 days" 'let elapsed = 
 store_mutant "latest first launch wins" 'let first = firsts.min() ?? now' 'let first = firsts.max() ?? now'
 store_mutant "defaults ignored (deleting the file resets the trial)" 'let firsts = [f.first, defaultsDate(Self.firstKey)].compactMap { $0 }' 'let firsts = [f.first].compactMap { $0 }'
 store_mutant "last seen not persisted" 'let seen = max(seens.max() ?? now, now)' 'let seen = now'
+store_mutant "the trial notice never shows" 'var isNew: Bool { readFile().first == nil && defaultsDate(Self.firstKey) == nil }' 'var isNew: Bool { false }'
+store_mutant "a deleted file restarts the trial" 'var isNew: Bool { readFile().first == nil && defaultsDate(Self.firstKey) == nil }' 'var isNew: Bool { readFile().first == nil }'
 store_mutant "trial blocks recording" 'if case .expired = s { return false }' 'if case .trial = s { return false }'
 # Transcription: the windows, the overlap and who is speaking.
 transcribe_mutant() { # <file in app/Transcribe> <name> <original text> <broken text>
@@ -125,6 +127,10 @@ transcribe_mutant Transcript.swift "windows do not overlap" 'start += length - o
 transcribe_mutant Transcript.swift "the overlap keeps words twice" 'let lo = i == 0 ? -Double.infinity : w.start + overlap / 2' 'let lo = i == 0 ? -Double.infinity : w.start'
 transcribe_mutant Transcript.swift "the microphone is the others" 'case (2, 1), (3, 2): return .me' 'case (2, 1), (3, 2): return .others'
 transcribe_mutant Transcript.swift "the script's mix is transcribed" 'case (1, 0), (2, 0), (3, 1): return .others' 'case (1, 0), (2, 0), (3, 0), (3, 1): return .others'
+transcribe_mutant Transcript.swift "the echo is kept" 'return !others.contains { o in' 'return true || !others.contains { o in'
+transcribe_mutant Transcript.swift "echo ignores time" 'guard o.start - slack <= m.end && m.start <= o.end + slack else { return false }' ''
+transcribe_mutant Transcript.swift "one shared word makes an echo" '/ Double(mine.count) >= share' '> 0'
+transcribe_mutant Transcript.swift "the others can be dropped as echo" 'guard m.speaker == .me else { return true }' ''
 transcribe_mutant Export.swift "a transcript may overwrite the evidence" 'if kinds.contains(ext) || ext == "sha256" { throw Failure.refused(media) }' ''
 # One file of app/ against its own bench (with Files.swift for the evidence hash):
 # meeting detection, search, the consent reminder and the integrity report.
@@ -189,8 +195,31 @@ BENCH=(app/Setup.swift tests/BackendTests.swift)
 engine_mutant Backend.swift "the preset never reaches the capture" 'o.fps = s.quality.fps; o.videoBitrate = s.quality.videoBitrate; ' ''
 engine_mutant Backend.swift "the disk minimum ignores the preset" 'minGB: q.minFreeGB(Int(c["MIN_FREE_GB"] ?? "") ?? 20, meeting: m == "meeting"),' 'minGB: Int(c["MIN_FREE_GB"] ?? "") ?? 20,'
 engine_mutant Backend.swift "a window in the conf is honored" 'CaptureTarget.parse(oneShot: env["IPSIO_TARGET"]) ?? CaptureTarget.parse(conf: c["CAPTURE_TARGET"])' 'CaptureTarget.parse(oneShot: env["IPSIO_TARGET"] ?? c["CAPTURE_TARGET"]) ?? .main'
-engine_mutant Backend.swift "a gone window reads as a failed start" '            case .windowGone: return t("window_gone")' '            case .noDisplay where false: return t("window_gone")'
+engine_mutant Backend.swift "a gone window reads as a failed start" 'case .windowGone: return ("window_gone", [], "WINDOW_GONE")' 'case .windowGone: return ("did_not_start", [], "DID_NOT_START")'
 engine_mutant Backend.swift "a display fallback is not said" 'target = "main_fallback"; out.append(t("display_gone"))' 'target = "main"'
+# The macOS 13/14 microphone (AVCaptureSession): format, failure, clock, override.
+engine_mutant Backend.swift "IPSIO_MIC never reaches the capture" 'o.micSource = s.micSource' ''
+engine_mutant Backend.swift "IPSIO_MIC is not read" 'micSource: Recorder.MicSource.parse(env["IPSIO_MIC"]))' 'micSource: .auto)'
+engine_mutant Backend.swift "a failed microphone hides its reason" 'case .microphone, .start, .writer, .windowClosed: return ("did_not_start", ["\(e)"], "DID_NOT_START")' 'case .microphone, .start, .writer, .windowClosed: return ("did_not_start", [""], "DID_NOT_START")'
+engine_mutant Backend.swift "a failed microphone reads as a missing one" 'case .microphone, .start, .writer, .windowClosed: return ("did_not_start", ["\(e)"], "DID_NOT_START")' 'case .microphone: return ("no_microphone", [], "NO_MICROPHONE")
+        case .start, .writer, .windowClosed: return ("did_not_start", ["\(e)"], "DID_NOT_START")'
+BENCH=(tests/EngineTests.swift)
+engine_mutant Recorder.swift "IPSIO_MIC never forces" '== "avcapture" ? .avcapture : .auto' '== "never" ? .avcapture : .auto'
+engine_mutant Recorder.swift "IPSIO_MIC forces on any word" '== "avcapture" ? .avcapture : .auto' '!= nil ? .avcapture : .auto'
+engine_mutant Recorder.swift "the session microphone keeps integer samples" 'AVLinearPCMBitDepthKey: 32, AVLinearPCMIsFloatKey: true,' 'AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false,'
+engine_mutant Recorder.swift "the session microphone at 16 kHz mono" 'AVSampleRateKey: 48_000, AVNumberOfChannelsKey: 2,' 'AVSampleRateKey: 16_000, AVNumberOfChannelsKey: 1,'
+engine_mutant Recorder.swift "the session microphone planar" 'AVLinearPCMIsNonInterleaved: false,' 'AVLinearPCMIsNonInterleaved: true,'
+engine_mutant Recorder.swift "no sound input still opens" 'if !device { return "the Mac has no sound input" }' ''
+engine_mutant Recorder.swift "a denied microphone still opens" 'if status == .denied || status == .restricted { return "no Microphone permission" }' ''
+engine_mutant Recorder.swift "a throwing input still opens" 'if let e = inputError { return e }' ''
+engine_mutant Recorder.swift "a refused input still opens" 'if !canAdd { return "the input cannot be added to the session" }' ''
+engine_mutant Recorder.swift "a session that does not run still opens" 'if !running { return "the session did not run" }' ''
+engine_mutant Recorder.swift "the host clock is converted anyway" 'guard let c = c, !CFEqual(c, CMClockGetHostTimeClock()) else { return nil }' 'guard let c = c else { return nil }'
+engine_mutant Recorder.swift "the clock conversion moves nothing" 'info[i].presentationTimeStamp = info[i].presentationTimeStamp + d' 'info[i].presentationTimeStamp = info[i].presentationTimeStamp'
+engine_mutant Writer.swift "a late microphone buffer vanishes silently" 'if i === micIn { dropped += 1 }; return' 'return'
+engine_mutant Writer.swift "the lead-in of computer sound counts as lost" 'if i === micIn { dropped += 1 }; return' 'dropped += 1; return'
+engine_mutant Writer.swift "a buffer stamped at the start is early" 'pts < (start ?? .zero)' 'pts <= (start ?? .zero)'
+engine_mutant Writer.swift "an unconverted buffer is not counted" 'func drop() { dropped += 1 }' 'func drop() { }'
 # Helper mode (Ipsio 1.1): cadence, dedup, sides, consent, secrets and the summary.
 helper_mutant() { # <file in app/Helper> <name> <original text> <broken text>
   rm -rf "$T/Helper"; cp -R "$ROOT/app/Helper" "$T/Helper"

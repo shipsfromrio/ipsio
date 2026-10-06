@@ -175,6 +175,27 @@ enum Transcript {
         }
         return all.map { $0.seg }
     }
+
+    /// Without headphones the microphone hears the speakers, and the others'
+    /// words came out twice, once as "Me" (measured on a real Mac). A "Me"
+    /// line is that echo when it overlaps an "Others" line in time and most
+    /// of its words are in it. "Others" is never dropped.
+    static func dropEcho(_ segs: [Segment], slack: Double = 1.0, share: Double = 0.6) -> [Segment] {
+        let others = segs.filter { $0.speaker == .others }
+        func words(_ s: String) -> [String] {
+            s.lowercased().components(separatedBy: .whitespaces).map(Overlap.norm).filter { !$0.isEmpty }
+        }
+        return segs.filter { m in
+            guard m.speaker == .me else { return true }
+            let mine = words(m.text)
+            guard !mine.isEmpty else { return true }
+            return !others.contains { o in
+                guard o.start - slack <= m.end && m.start <= o.end + slack else { return false }
+                let theirs = Set(words(o.text))
+                return Double(mine.filter { theirs.contains($0) }.count) / Double(mine.count) >= share
+            }
+        }
+    }
 }
 
 /// A window nobody spoke in is not sent to the recognizer: it saves the

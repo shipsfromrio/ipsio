@@ -30,7 +30,9 @@ for arch in arm64 x86_64; do
 done
 lipo -create "$T/Ipsio-arm64" "$T/Ipsio-x86_64" -output "$APP/Contents/MacOS/Ipsio"
 
-USAGE_CAL="Ipsio reads your meetings from the Calendar app to record them at the right time. Nothing leaves the Mac. / O Ipsio lê as reuniões do app Calendário para gravá-las na hora certa. Nada sai do Mac."
+USAGE_CAL="Ipsio reads your meetings from the Calendar app to record them at the right time. Nothing leaves the Mac."
+USAGE_MIC="In meeting mode, Ipsio records your voice in its own track. It stays on this Mac."
+USAGE_SPEECH="Ipsio transcribes your recordings on this Mac, never on a server."
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -52,11 +54,23 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>ITSAppUsesNonExemptEncryption</key><false/>
   <key>NSCalendarsFullAccessUsageDescription</key><string>$USAGE_CAL</string>
   <key>NSCalendarsUsageDescription</key><string>$USAGE_CAL</string>
-  <key>NSMicrophoneUsageDescription</key><string>In meeting mode, Ipsio records your voice in its own track. It stays on this Mac. / No modo reunião, o Ipsio grava a sua voz numa faixa própria. Ela fica neste Mac.</string>
-  <key>NSSpeechRecognitionUsageDescription</key><string>Ipsio transcribes your recordings on this Mac, never on a server. / O Ipsio transcreve as suas gravações neste Mac, nunca num servidor.</string>
+  <key>NSMicrophoneUsageDescription</key><string>$USAGE_MIC</string>
+  <key>NSSpeechRecognitionUsageDescription</key><string>$USAGE_SPEECH</string>
 </dict></plist>
 PLIST
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
+
+# The permission prompts in the Mac's language: one language per string.
+mkdir -p "$APP/Contents/Resources/en.lproj" "$APP/Contents/Resources/pt-BR.lproj"
+strings() { # <calendar> <microphone> <speech>
+  printf '"NSCalendarsUsageDescription" = "%s";\n"NSCalendarsFullAccessUsageDescription" = "%s";\n' "$1" "$1"
+  printf '"NSMicrophoneUsageDescription" = "%s";\n"NSSpeechRecognitionUsageDescription" = "%s";\n' "$2" "$3"
+}
+strings "$USAGE_CAL" "$USAGE_MIC" "$USAGE_SPEECH" > "$APP/Contents/Resources/en.lproj/InfoPlist.strings"
+strings "O Ipsio lê as reuniões do app Calendário para gravá-las na hora certa. Nada sai do Mac." \
+  "No modo reunião, o Ipsio grava a sua voz numa faixa própria. Ela fica neste Mac." \
+  "O Ipsio transcreve as suas gravações neste Mac, nunca num servidor." > "$APP/Contents/Resources/pt-BR.lproj/InfoPlist.strings"
+for f in "$APP"/Contents/Resources/*.lproj/InfoPlist.strings; do plutil -lint "$f" >/dev/null; done
 
 # The App Store checks which SDK and Xcode built the app (the DT keys Xcode
 # writes). A store upload needs Xcode installed; an ad hoc build does not.

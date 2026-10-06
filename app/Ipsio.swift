@@ -162,7 +162,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "quality_economy": "Econômica (~%@ GB/h)", "quality_normal": "Normal (~%@ GB/h)", "quality_high": "Alta (~%@ GB/h)",
             "hotkeys": "Atalhos ⌃⌥⌘R (gravar/parar) e ⌃⌥⌘T (testar)",
             "login": "Abrir ao iniciar a sessão", "login_failed": "O macOS não aceitou o item de login",
-            "language": "Switch to English  🇺🇸", "restart": "Reiniciar o app", "quit": "Sair (até o próximo login)",
+            "language": "Switch to English  🇺🇸", "restart": "Reiniciar o app", "quit": "Sair (até o próximo login)", "quit_store": "Sair",
             "waiting": "Aguardando a permissão de Gravação de Tela…",
             "recording": "GRAVANDO", "measuring": "medindo o som", "disk": "disco para %@ h",
             "silent_for": "GRAVANDO SEM SOM há %@ s", "alarm_title": "SEM SOM HÁ %@ SEGUNDOS",
@@ -260,7 +260,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "quality_economy": "Economy (~%@ GB/h)", "quality_normal": "Normal (~%@ GB/h)", "quality_high": "High (~%@ GB/h)",
             "hotkeys": "Shortcuts ⌃⌥⌘R (record/stop) and ⌃⌥⌘T (test)",
             "login": "Open at login", "login_failed": "macOS refused the login item",
-            "language": "Mudar para português  🇧🇷", "restart": "Restart the app", "quit": "Quit (until next login)",
+            "language": "Mudar para português  🇧🇷", "restart": "Restart the app", "quit": "Quit (until next login)", "quit_store": "Quit",
             "waiting": "Waiting for the Screen Recording permission…",
             "recording": "RECORDING", "measuring": "measuring sound", "disk": "disk for %@ h",
             "silent_for": "RECORDING WITHOUT SOUND for %@ s", "alarm_title": "NO SOUND FOR %@ SECONDS",
@@ -356,10 +356,23 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     var calendarAuto: Bool { (readConf()["CALENDAR_AUTO"] ?? "1") != "0" }
     func minutes(_ k: String, _ fallback: Double) -> TimeInterval { (Double(readConf()[k] ?? "") ?? fallback) * 60 }
 
-    func applicationDidFinishLaunching(_ n: Notification) {
-        // A single instance: a kickstart on top of an app opened outside launchd
-        // once left two circles in the bar.
-        if let bid = Bundle.main.bundleIdentifier, NSRunningApplication.runningApplications(withBundleIdentifier: bid).count > 1 { NSApp.terminate(nil); return }
+    func applicationDidFinishLaunching(_ n: Notification) { singleInstance(tries: 6) }
+
+    /// A single instance: a kickstart on top of an app opened outside launchd
+    /// once left two circles in the bar. Another copy still there waits (up to
+    /// 6 s, the run loop running so the list of apps refreshes) before giving
+    /// up: a relaunch after a permission starts while the old copy quits.
+    /// (Measured: the sandbox drops launch arguments, so the new copy cannot be told.)
+    func singleInstance(tries: Int) {
+        let bid = Bundle.main.bundleIdentifier ?? ""
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: bid)
+            .filter { !$0.isTerminated && $0.processIdentifier != getpid() }
+        if bid.isEmpty || others.isEmpty { launch(); return }
+        if tries == 0 { NSApp.terminate(nil); return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.singleInstance(tries: tries - 1) }
+    }
+
+    func launch() {
         // Private, like install-app.sh makes it: conf may hold a token in
         // CALENDAR_COMMAND, and the cache has meeting titles and links.
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -403,7 +416,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         }
         MacCalendar.install()
         restoreFolderAccess()
+        trialNoticePending = License.currentBuild == .store && licenseRecord.isNew
         startLicense()
+        if trialNoticePending { showTrialNotice() }
         skipped = Set(((try? String(contentsOfFile: skipPath, encoding: .utf8)) ?? "").components(separatedBy: "\n").filter { !$0.isEmpty })
         meetings = Sources(dir: dir, conf: readConf()).readCache()
         refresh()
@@ -765,7 +780,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         permItem.title = t("perm"); permScreen.title = t("perm_screen"); permMic.title = t("perm_mic")
         doctorItem.title = t("doctor"); doctorItem.isEnabled = !busy
         connectItem.title = Sources(dir: dir, conf: readConf()).configured.contains { $0 == "ics" || $0 == "macos" } ? t("connect_again") : t("connect")
-        languageItem.title = t("language"); hotKeysItem.title = t("hotkeys"); searchItem.title = t("search_menu"); detectItem.title = t("detect_menu"); consentItem.title = Consent.t("menu", lang: lang); consentItem.state = Consent.enabled(readConf()) ? .on : .off; detectItem.state = readConf()["DETECT_MEETINGS"] == "0" ? .off : .on; hotKeysItem.state = HotKeys.enabled(readConf()["HOTKEYS"]) ? .on : .off; restartItem.title = t("restart"); quitItem.title = t("quit")
+        languageItem.title = t("language"); hotKeysItem.title = t("hotkeys"); searchItem.title = t("search_menu"); detectItem.title = t("detect_menu"); consentItem.title = Consent.t("menu", lang: lang); consentItem.state = Consent.enabled(readConf()) ? .on : .off; detectItem.state = readConf()["DETECT_MEETINGS"] == "0" ? .off : .on; hotKeysItem.state = HotKeys.enabled(readConf()["HOTKEYS"]) ? .on : .off; restartItem.title = t("restart"); quitItem.title = t(License.currentBuild == .store ? "quit_store" : "quit")
         // The recording lives in this process now: restarting would cut it.
         restartItem.isEnabled = !on && !busy
         helper.refresh(recording: on, file: { [unowned self] in self.currentFile() })   // helper mode hook: starts and stops with the recording
@@ -779,7 +794,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             if !on { statusItem.title = LicenseTexts.title("expired", lang: lang) }
         default: break
         }
-        buyItem.title = LicenseTexts.t("menu_buy", [price ?? "US$ 19.99"], lang: lang)
+        buyItem.title = price.map { LicenseTexts.t("menu_buy", [$0], lang: lang) } ?? LicenseTexts.t("menu_buy_noprice", [], lang: lang)
         restoreItem.title = LicenseTexts.t("menu_restore", lang: lang)
         let c = readConf()
         let title = c["TITLE"] ?? ""
@@ -802,13 +817,28 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         }
     }
 
+    /// GPL: the LaunchAgent (KeepAlive) reopens the app. Store (no LaunchAgent):
+    /// the app opens a new copy of itself, which waits for this one to go.
+    var relaunching = false
+    func relaunch() {
+        #if STORE
+        guard !relaunching else { return }
+        relaunching = true
+        let c = NSWorkspace.OpenConfiguration(); c.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: c) { _, err in
+            DispatchQueue.main.async { if err == nil { NSApp.terminate(nil) } else { self.relaunching = false } }
+        }
+        #else
+        NSApp.terminate(nil)
+        #endif
+    }
+
     // 3 s timer: watcher + live meter + calendar. Nothing here blocks the UI:
     // whatever calls the script runs off the main thread.
     func tick() {
         if waitingPermission {
-            // The permission came in: only a new process sees it. The
-            // LaunchAgent (KeepAlive) reopens the app right away.
-            if CGPreflightScreenCaptureAccess() { NSApp.terminate(nil) }
+            // The permission came in: only a new process sees it.
+            if CGPreflightScreenCaptureAccess() { relaunch() }
             return
         }
         if busy { return }
@@ -1388,10 +1418,30 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     var licenseCache: (at: Date, state: LicenseState)?
     lazy var licenseRecord = LicenseRecord(file: URL(fileURLWithPath: dir + "/license"), defaults: UserDefaults.standard)
     /// Read at most once a minute (refresh runs every 3 s).
+    /// The first launch of the store edition: the trial starts only after its
+    /// terms were shown (App Review 3.1.1: duration, what stops, the price).
+    var trialNoticePending = false
     func license(fresh: Bool = false) -> LicenseState {
+        if trialNoticePending { return .trial(daysLeft: License.trialDays) }
         if !fresh, let c = licenseCache, Date().timeIntervalSince(c.at) < 60 { return c.state }
         let s = licenseRecord.state(now: Date(), purchased: purchased, build: License.currentBuild)
         licenseCache = (Date(), s); return s
+    }
+    func showTrialNotice() {
+        modal({
+            let a = NSAlert()
+            a.messageText = LicenseTexts.title("notice", lang: self.lang)
+            a.informativeText = LicenseTexts.body("notice", lang: self.lang)
+            a.addButton(withTitle: LicenseTexts.t("notice_start", [], lang: self.lang))
+            a.addButton(withTitle: LicenseTexts.t("notice_buy", [], lang: self.lang))
+            a.addButton(withTitle: LicenseTexts.t("menu_restore", [], lang: self.lang))
+            return a
+        }) { r in
+            self.trialNoticePending = false
+            _ = self.license(fresh: true)                     // the trial starts here
+            self.refresh()
+            if r == .alertSecondButtonReturn { self.doBuy() } else if r == .alertThirdButtonReturn { self.doRestore() }
+        }
     }
     func licenseAllows(explain: Bool) -> Bool {
         if License.canStartRecording(license(fresh: true)) { return true }

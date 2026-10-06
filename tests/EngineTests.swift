@@ -47,6 +47,28 @@ func audioBuffer(_ t: CMTime, frames: Int = 4800, amp: Float = 0.5) -> CMSampleB
     return sb!
 }
 
+/// 0.1 s in the format `a` describes (interleaved): a float32 sine, or zeros for any other format.
+func pcmBuffer(_ a: AudioStreamBasicDescription, amp: Float) -> CMSampleBuffer {
+    var asbd = a
+    let frames = Int(a.mSampleRate / 10), bytes = frames * Int(a.mBytesPerFrame)
+    var fd: CMAudioFormatDescription?
+    CMAudioFormatDescriptionCreate(allocator: nil, asbd: &asbd, layoutSize: 0, layout: nil, magicCookieSize: 0, magicCookie: nil, extensions: nil, formatDescriptionOut: &fd)
+    var raw = [UInt8](repeating: 0, count: bytes)
+    if a.mFormatFlags & kAudioFormatFlagIsFloat != 0 && a.mBitsPerChannel == 32 {
+        let ch = Int(a.mChannelsPerFrame)
+        raw.withUnsafeMutableBytes { p in
+            let f = p.bindMemory(to: Float.self)
+            for i in 0..<frames { let v = amp * Float(sin(2 * Double.pi * 440 * Double(i) / a.mSampleRate)); for c in 0..<ch { f[i * ch + c] = v } }
+        }
+    }
+    var bb: CMBlockBuffer?
+    CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: bytes, blockAllocator: nil, customBlockSource: nil, offsetToData: 0, dataLength: bytes, flags: 0, blockBufferOut: &bb)
+    raw.withUnsafeBytes { _ = CMBlockBufferReplaceDataBytes(with: $0.baseAddress!, blockBuffer: bb!, offsetIntoDestination: 0, dataLength: bytes) }
+    var sb: CMSampleBuffer?
+    CMAudioSampleBufferCreateReadyWithPacketDescriptions(allocator: nil, dataBuffer: bb!, formatDescription: fd!, sampleCount: frames, presentationTimeStamp: .zero, packetDescriptions: nil, sampleBufferOut: &sb)
+    return sb!
+}
+
 /// Writes `seconds` of 12 fps video plus one or two audio tracks.
 func writeSynthetic(_ path: String, seconds: Int, mic: Bool, finish: Bool, fragment: Double = 2) -> Bool {
     try? FileManager.default.removeItem(atPath: path)
@@ -152,6 +174,58 @@ struct EngineTests {
         let e = AudioEnergy.of(audioBuffer(.zero, frames: 48_000, amp: 0.5))
         check(e != nil && abs(Sound.dB(e!.sumSquares / Double(e!.values)) - (-9.03)) < 0.05, "the energy of a sine wave", "\(String(describing: e))")
         check(Sound.dB(AudioEnergy.of(audioBuffer(.zero, amp: 0))!.sumSquares) == -.infinity, "digital silence is -inf")
+
+        // ------------------------------------- the 13/14 microphone path ---
+        check(Recorder.MicSource.parse("avcapture") == .avcapture && Recorder.MicSource.parse(" AVCapture ") == .avcapture,
+              "IPSIO_MIC=avcapture forces the AVCaptureSession microphone")
+        check([nil, "", "sck", "avcapture2", "1"].allSatisfy { Recorder.MicSource.parse($0) == .auto }, "anything else keeps the default microphone path")
+        let pcm = AVAudioFormat(settings: Recorder.micPCM)
+        check(pcm?.commonFormat == .pcmFormatFloat32 && pcm?.sampleRate == 48_000 && pcm?.channelCount == 2 && pcm?.isInterleaved == true,
+              "the session's microphone comes as float32, 48 kHz, stereo, interleaved", "\(String(describing: pcm))")
+        if let f = pcm {
+            let a = f.streamDescription.pointee
+            check(AudioEnergy.of(pcmBuffer(a, amp: 0.5)).map { abs(Sound.dB($0.sumSquares / Double($0.values)) - (-9.03)) < 0.05 } == true,
+                  "that format is metered (the meter does not stay empty)")
+        }
+        let i24 = AudioStreamBasicDescription(mSampleRate: 48_000, mFormatID: kAudioFormatLinearPCM, mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+                                              mBytesPerPacket: 6, mFramesPerPacket: 1, mBytesPerFrame: 6, mChannelsPerFrame: 2, mBitsPerChannel: 24, mReserved: 0)
+        check(AudioEnergy.of(pcmBuffer(i24, amp: 0.5)) == nil, "a USB interface's native 24-bit is not metered: why the format is fixed")
+        check(Recorder.micProblem(device: false, status: .authorized, inputError: nil, canAdd: true, running: true) == "the Mac has no sound input", "no sound input: the start fails")
+        check(Recorder.micProblem(device: true, status: .denied, inputError: nil, canAdd: true, running: true) == "no Microphone permission"
+              && Recorder.micProblem(device: true, status: .restricted, inputError: nil, canAdd: true, running: true) == "no Microphone permission",
+              "no Microphone permission: the start fails")
+        check(Recorder.micProblem(device: true, status: .authorized, inputError: "busy", canAdd: true, running: true) == "busy", "an input that throws: its error is the reason")
+        check(Recorder.micProblem(device: true, status: .authorized, inputError: nil, canAdd: false, running: true) != nil, "an input the session refuses: the start fails")
+        check(Recorder.micProblem(device: true, status: .authorized, inputError: nil, canAdd: true, running: false) == "the session did not run", "a session that does not run: the start fails")
+        check(Recorder.micProblem(device: true, status: .authorized, inputError: nil, canAdd: true, running: true) == nil
+              && Recorder.micProblem(device: true, status: .notDetermined, inputError: nil, canAdd: true, running: true) == nil,
+              "a running session with permission (or the question still to ask): no problem")
+        let fm0 = Recorder.Failure.microphone("no Microphone permission")
+        check("\(fm0)".contains("microphone") && "\(fm0)".contains("no Microphone permission") && !"\(fm0)".contains("\u{2014}"), "the failure names the microphone and the reason")
+        check(Recorder.foreignClock(CMClockGetHostTimeClock()) == nil && Recorder.foreignClock(nil) == nil, "the host clock needs no conversion")
+        var dclock: CMClock?
+        if CMAudioDeviceClockCreate(allocator: nil, deviceUID: nil, clockOut: &dclock) == noErr, let dc = dclock {
+            check(Recorder.foreignClock(dc) != nil, "an audio device clock is converted")
+        }
+        let b1 = audioBuffer(CMTime(value: 48_000, timescale: 48_000), frames: 4800)
+        let b2 = Recorder.shifted(b1, by: CMTime(value: 24_000, timescale: 48_000))
+        check(b2.map { CMSampleBufferGetPresentationTimeStamp($0) == CMTime(value: 72_000, timescale: 48_000) && CMSampleBufferGetNumSamples($0) == 4800 } == true,
+              "a shifted buffer starts where the host clock says, same samples")
+        check(b2.flatMap { AudioEnergy.of($0) }.map { $0.sumSquares } == AudioEnergy.of(b1)?.sumSquares, "the shift keeps the sound")
+        check(Recorder.shifted(b1, by: .zero).map { $0 === b1 } == true, "no shift, the same buffer")
+        let one = CMTime(value: 1, timescale: 1), half = CMTime(value: 1, timescale: 2)
+        check(Writer.early(half, one) && !Writer.early(one, one) && !Writer.early(CMTime(value: 2, timescale: 1), one) && !Writer.early(half, nil),
+              "early means stamped before the file's start")
+        let lateMov = dir + "/late.mov"
+        let wl = try! Writer(url: URL(fileURLWithPath: lateMov), .init(width: 64, height: 48, microphone: true))
+        wl.appendVideo(videoBuffer(CMTime(value: 12, timescale: 12)))
+        wl.appendSystem(audioBuffer(CMTime(value: 24_000, timescale: 48_000)))
+        check(wl.dropped == 0, "computer sound before the first frame is the lead-in, not a loss")
+        wl.appendMic(audioBuffer(CMTime(value: 24_000, timescale: 48_000)))
+        check(wl.dropped == 1, "a microphone buffer stamped before the start counts as dropped", "\(wl.dropped)")
+        wl.drop()
+        check(wl.dropped == 2, "a buffer the capture could not convert counts as dropped")
+        _ = wl.finish()
 
         // -------------------------------------------------------- writer ---
         let mov = dir + "/w.mov"

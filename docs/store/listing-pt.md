@@ -106,7 +106,7 @@ começa uma, uma notificação lembra, e um clique copia o aviso.
 TRANSCRIÇÃO NO SEU MAC
 Cada gravação vira uma transcrição com quem falou: você pela faixa do
 microfone, os outros pela faixa do computador. A fala é reconhecida neste Mac,
-nunca num servidor.
+nunca num servidor (o macOS pode baixar antes o idioma da Apple).
 
 ## Novidades (versão 1.0)
 
