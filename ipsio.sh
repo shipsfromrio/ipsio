@@ -310,7 +310,10 @@ safe_path() { case "$1" in *[\ :,\;\'\"\[\]\\]*) return 1;; esac; return 0; }
 # after_save <file>: once a recording is saved, in the background, its SHA-256
 # next to it (<file>.sha256, "shasum -c" format: evidence that the file was not
 # changed afterwards) and then the POST_RECORDING hook from the conf, with the
-# file as $1 (transcription and the like plug in here). Every descriptor goes
+# file as $1 (transcription and the like plug in here). Between the two, the
+# signal to the office panel (below), when configured: it reuses the hash and
+# goes before the hook, so a slow transcriber does not delay it. $2 is the
+# duration in seconds and $3 the recording mode. Every descriptor goes
 # to the log: the app reads stop's output to the end, and a child holding that
 # pipe would freeze it for as long as the hash or the hook runs. A failing
 # hook never touches the video.
@@ -322,6 +325,8 @@ after_save() {
   (
     sum=$(sha256_of "$f")
     if [ -n "$sum" ]; then printf '%s  %s\n' "$sum" "$(basename "$f")" > "$f.sha256.tmp" && mv -f "$f.sha256.tmp" "$f.sha256"; fi
+    # A failing signal never touches the video nor stops the hook.
+    signal_recording "$f" "$sum" "${2:-}" "${3:-class}" || true
     if [ -n "${POST_RECORDING:-}" ]; then
       echo "$(date '+%F %T') POST_RECORDING $f"
       bash -c "$POST_RECORDING \"\$1\"" ipsio-hook "$f"
@@ -330,6 +335,149 @@ after_save() {
     fi
   ) < /dev/null >> "$DIR/post-recording.log" 2>&1 &
 }
+
+# ---------------------------------------------------- signal to a panel ---
+# Optional: after each saved recording, one line per measure goes to the
+# panel of the office that runs Ipsio (POST <PROJETOS_SINAL_URL>/projetos/sinal,
+# header X-Projetos-Secret). Three measures, tipo=operacao:
+#   reuniao_gravada  = 1 per saved recording;
+#   minutos_gravados = its length in minutes (from the ffprobe that stop ran).
+# No reuniao_transcrita: Ipsio does not transcribe (docs/DESIGN.md).
+#
+# What never leaves: the file name, the title, the folder. The title carries
+# the meeting name, and a meeting name may carry a person's name. The only
+# reference is the recording's SHA-256 (the same one in the .sha256 file),
+# written in groups of 8 joined by ':' (ab12cd34:ef56...; remove the ':' to
+# get the hex back). Why grouped: the panel refuses a ref with a run of exactly
+# 11 or 14 digits (it reads as a CPF/CNPJ), and plain hex has such a run in
+# 5.5% of hashes (200,000 random hashes, 11/10/2026): one recording in 18 would
+# be refused and lost. A ':' every 8 characters caps any run at 8 digits. The
+# same form is used by the house's other reporters.
+#
+# Optional case link, meta.caso_hash: only when the recording name has a CNJ
+# lawsuit number (NNNNNNN-DD.AAAA.J.TR.OOOO) AND PROJETOS_SINAL_SAL is set:
+# sha256(salt + the 20 digits), grouped the same way. The number itself never
+# leaves; the panel finds the case by hashing its own list with the same salt.
+# No salt, no caso_hash (an unsalted hash of a 20-digit number is reversible).
+#
+# Queue first, send later: every signal goes to $DIR/signals.jsonl, then the
+# queue is drained. 200 leaves the queue, 400 (refused) is dropped, anything
+# else (403, 409, 5xx, no network) stays for the next drain (`ipsio signals`,
+# or the next recording). Each line carries a stable "idempotencia" (ref +
+# metric): sent twice, the panel keeps one. Without PROJETOS_SINAL_URL and
+# PROJETOS_SINAL_SECRET (conf or environment) nothing is sent and the queue
+# just grows; PROJETOS_SINAL_DESLIGADO=1 neither queues nor sends. Every send,
+# refusal and drop goes to $DIR/signals.log, never with the secret, the URL's
+# answer body, or a file name. The secret goes to curl on stdin (-K -), never
+# on its command line, where ps would show it.
+SIGNAL_Q="$DIR/signals.jsonl"
+SIGNAL_LOG="$DIR/signals.log"
+SIGNAL_LOCK="$DIR/signals.lock"
+signal_log() { echo "$(date '+%F %T') $*" >> "$SIGNAL_LOG"; }
+# grouped <hex>: the hex digest in groups of 8 joined by ':'.
+grouped() { printf '%s' "$1" | sed -E 's/(.{8})/\1:/g; s/:$//'; }
+# looks_like_document <text>: 0 when the text has a run of 11 or 14 digits
+# (with . - / or space inside), the same rule the panel refuses by.
+looks_like_document() {
+  printf '%s\n' "$1" | awk '{ s = $0
+    while (match(s, /[0-9][0-9.\/ -]*[0-9]/)) {
+      r = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
+      d = r; gsub(/[^0-9]/, "", d)
+      if (length(r) >= 11 && (length(d) == 11 || length(d) == 14)) found = 1
+    }
+  } END { exit !found }'
+}
+# cnj_in <name>: the 20 digits of the first CNJ number in a name, or nothing.
+cnj_in() { printf '%s' "$1" | grep -oE '[0-9]{7}-[0-9]{2}\.[0-9]{4}\.[0-9]\.[0-9]{2}\.[0-9]{4}' | head -1 | tr -cd '0-9'; }
+signal_lock() {
+  # A lock left by a killed process is stale after 10 minutes.
+  [ -d "$SIGNAL_LOCK" ] && [ -n "$(find "$SIGNAL_LOCK" -maxdepth 0 -mmin +10 2>/dev/null)" ] && rmdir "$SIGNAL_LOCK" 2>/dev/null
+  for _ in $(seq 1 120); do mkdir "$SIGNAL_LOCK" 2>/dev/null && return 0; sleep 0.5; done
+  return 1
+}
+signal_unlock() { rmdir "$SIGNAL_LOCK" 2>/dev/null; }
+# signal_enqueue <hex sha> <metric> <value> <alvo> <meta json> <file name>:
+# one line in the queue, unless one with the same idempotencia
+# (ipsio:<metric>:<sha>, unique across every project in the panel) is there. The
+# line is refused (and logged by rule, never by value) if a field looks like a
+# CPF/CNPJ or if the file name shows up anywhere in it.
+signal_enqueue() {
+  local ref key line when
+  ref=$(grouped "$1"); key="ipsio:$2:$1"
+  when=$(date '+%Y-%m-%dT%H:%M:%S%z' | sed -E 's/([+-][0-9]{2})([0-9]{2})$/\1:\2/')
+  line=$(printf '{"projeto":"ipsio","tipo":"operacao","alvo":"%s","metrica":"%s","valor":%s,"ref":"%s","meta":%s,"ocorrido_em":"%s","idempotencia":"%s"}' \
+    "$4" "$2" "$3" "$ref" "$5" "$when" "$key")
+  if looks_like_document "$4"; then signal_log "refused $2: pii_alvo"; return 1; fi
+  if looks_like_document "$ref"; then signal_log "refused $2: pii_ref"; return 1; fi
+  if looks_like_document "$5"; then signal_log "refused $2: pii_meta"; return 1; fi
+  case "$line" in *"$6"*) signal_log "refused $2: file name in the signal"; return 1;; esac
+  signal_lock || { signal_log "not queued $2: queue locked"; return 1; }
+  if [ -f "$SIGNAL_Q" ] && grep -qF "\"idempotencia\":\"$key\"" "$SIGNAL_Q"; then
+    signal_log "already queued $2"
+  else
+    (umask 077; printf '%s\n' "$line" >> "$SIGNAL_Q"); signal_log "queued $2"
+  fi
+  signal_unlock
+}
+# signal_recording <file> <hex sha> <duration in seconds> <mode>: the measures
+# of one saved recording, queued and then drained.
+signal_recording() {
+  local name mode alvo meta cnj salted min
+  if [ "${PROJETOS_SINAL_DESLIGADO:-}" = 1 ]; then signal_log "off (PROJETOS_SINAL_DESLIGADO=1): nothing queued"; return 0; fi
+  [ -n "$2" ] || { signal_log "not queued: no hash"; return 1; }
+  name=$(basename "$1")
+  mode="${4:-class}"; if [ "$mode" = meeting ]; then alvo=reuniao; else alvo=aula; fi
+  meta="{\"modo\":\"$mode\"}"
+  cnj=$(cnj_in "$name")
+  if [ -n "$cnj" ]; then
+    if [ -n "${PROJETOS_SINAL_SAL:-}" ]; then
+      salted=$(printf '%s%s' "$PROJETOS_SINAL_SAL" "$cnj" | sha256_of -)
+      meta="{\"modo\":\"$mode\",\"caso_hash\":\"$(grouped "$salted")\"}"
+    else
+      signal_log "no caso_hash: the name has a lawsuit number but PROJETOS_SINAL_SAL is not set"
+    fi
+  fi
+  signal_enqueue "$2" reuniao_gravada 1 "$alvo" "$meta" "$name"
+  min=$(awk -v d="${3:-}" 'BEGIN { if (d + 0 > 0) printf "%.1f", d / 60 }')
+  if [ -n "$min" ]; then signal_enqueue "$2" minutos_gravados "$min" "$alvo" "$meta" "$name"; else signal_log "no minutos_gravados: no duration"; fi
+  signal_drain
+}
+# signal_drain: sends what is queued. Prints nothing; the log says it all.
+signal_drain() {
+  local line code body rest sec metric n=0
+  if [ "${PROJETOS_SINAL_DESLIGADO:-}" = 1 ]; then signal_log "off (PROJETOS_SINAL_DESLIGADO=1): nothing sent"; return 0; fi
+  [ -s "$SIGNAL_Q" ] || return 0
+  if [ -z "${PROJETOS_SINAL_URL:-}" ] || [ -z "${PROJETOS_SINAL_SECRET:-}" ]; then
+    signal_log "kept $(wc -l < "$SIGNAL_Q" | tr -d ' '): PROJETOS_SINAL_URL or PROJETOS_SINAL_SECRET not set"; return 0
+  fi
+  signal_lock || { signal_log "not sent: queue locked"; return 1; }
+  body="$DIR/signal-body.json"; rest="$SIGNAL_Q.rest"
+  sec=${PROJETOS_SINAL_SECRET//\\/\\\\}; sec=${sec//\"/\\\"}
+  (umask 077; : > "$rest")
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ -n "$line" ] || continue
+    metric=$(printf '%s' "$line" | sed -E 's/.*"metrica":"([a-z_]+)".*/\1/')
+    (umask 077; printf '%s' "$line" > "$body")
+    code=$(printf 'header = "X-Projetos-Secret: %s"\n' "$sec" \
+      | curl -s -K - -o /dev/null -w '%{http_code}' --max-time 20 \
+          -H 'Content-Type: application/json' --data-binary "@$body" \
+          "${PROJETOS_SINAL_URL%/}/projetos/sinal" 2>/dev/null)
+    case "$code" in
+      200) signal_log "sent $metric"; n=$((n+1));;
+      400) signal_log "dropped $metric: refused by the panel (400)";;
+      # The first signal kept means the panel is down or refusing: the rest
+      # stays queued untried (cat reads the loop's own input to the end). A
+      # hanging panel would otherwise hold the lock 20 s per line, and a
+      # recording ending meanwhile would give up queueing after 60 s.
+      *) printf '%s\n' "$line" >> "$rest"; cat >> "$rest"
+         signal_log "kept $(wc -l < "$rest" | tr -d ' '): http ${code:-none} on $metric"; break;;
+    esac
+  done < "$SIGNAL_Q"
+  mv -f "$rest" "$SIGNAL_Q"; rm -f "$body"
+  signal_unlock
+  return 0
+}
+signals_pending() { if [ -s "$SIGNAL_Q" ]; then wc -l < "$SIGNAL_Q" | tr -d ' '; else echo 0; fi; }
 
 restore_output() { local o; o=$(output_to_restore); [ -n "$o" ] && SwitchAudioSource -t output -s "$o" >/dev/null 2>&1; }
 
@@ -559,6 +707,7 @@ case "$1" in
     restore_output
     A=$(current_file)
     if [ -n "$A" ] && [ -f "$A" ]; then
+      RMODE=$(recording_mode)
       D=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$A" 2>/dev/null)
       DUR=$(echo "${D:-0}" | awk '{h=int($1/3600); mi=int(($1%3600)/60); if(h>0) printf "%dh%02dmin", h, mi; else if (mi>0) printf "%d min", mi; else printf "%d s", int($1)}')
       read -r CLASS PCT AVG <<< "$(sound_summary "$LEVEL")"
@@ -585,7 +734,7 @@ case "$1" in
       # at launch when the output is stuck on Ipsio) must not save it again
       # and re-run the hook on it.
       rm -f "$FILEREC" "$MODEREC"
-      after_save "$A"
+      after_save "$A" "$D" "$RMODE"
       t "$TIT"
       t saved_body "$(basename "$A")" "$DUR" "$(size_of "$A")" "$SND" "$(dirname "$A")"
       echo ""
@@ -648,7 +797,9 @@ case "$1" in
   mode) echo "$MODE";;
   microphone) microphone;;
   doctor) doctor; exit $?;;
-  *) echo "usage: ipsio.sh start|level|check|status|stop|test|doctor|folder|title|output|device|language|mode|microphone";;
+  # signals: sends what is queued for the office panel, says what is left.
+  signals) signal_drain; echo "pending $(signals_pending)"; state signals_pending="$(signals_pending)";;
+  *) echo "usage: ipsio.sh start|level|check|status|stop|test|doctor|signals|folder|title|output|device|language|mode|microphone";;
 esac
 }
 

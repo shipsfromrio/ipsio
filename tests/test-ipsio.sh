@@ -104,6 +104,16 @@ cat > "$BIN/date" <<'EOF'
 [ -f "$STUB/now" ] && [ "$1" = "+%Y-%m-%d_%H-%M" ] && exec cat "$STUB/now"
 exec /bin/date "$@"
 EOF
+# curl: the office panel double (tests/test-signals.sh has the full bench).
+# Keeps each body; answers $STUB/curl_code (200 by default; 000 = no network).
+cat > "$BIN/curl" <<'EOF2'
+#!/bin/bash
+cat > /dev/null
+prev=""; for a in "$@"; do [ "$prev" = "--data-binary" ] && { cat "${a#@}"; echo; } >> "$STUB/bodies"; prev="$a"; done
+code=$(cat "$STUB/curl_code" 2>/dev/null || echo 200)
+[ "$code" = 000 ] && { printf '000'; exit 7; }
+printf '%s' "$code"
+EOF2
 chmod +x "$BIN"/*
 
 # scenario: clean state and a "good" Mac (everything present).
@@ -208,6 +218,33 @@ F=$(printf '%s\n' "$S" | sed -n 's/^#state .* file=//p')
 for _ in $(seq 1 20); do [ -s "$F.sha256" ] && break; sleep 0.5; done
 [ -s "$F.sha256" ] && ok "without a hook the hash is still written" || fail "without a hook the hash is still written"
 grep -q POST_RECORDING "$ROOT/home/.ipsio/post-recording.log" 2>/dev/null && fail "no hook configured, nothing run" || ok "no hook configured, nothing run"
+
+# The signal to the office panel: sent after the hash, never with the title,
+# and a panel that is down neither touches the video nor stops the hook.
+scenario; rm -f "$ROOT/hook-arg"
+printf '#!/bin/bash
+printf %%s "$1" > "%s/hook-arg"
+' "$ROOT" > "$ROOT/hook.sh"; chmod +x "$ROOT/hook.sh"
+conf "MODE='meeting'" "TITLE='Zqxwv call'" "POST_RECORDING='$ROOT/hook.sh'" "PROJETOS_SINAL_URL='http://panel.invalid'" "PROJETOS_SINAL_SECRET='FAKE-SECRET-zqv'"
+run start >/dev/null; S=$(run stop)
+for _ in $(seq 1 40); do grep -q 'sent minutos_gravados' "$ROOT/home/.ipsio/signals.log" 2>/dev/null && break; sleep 0.5; done
+B=$(cat "$STUB/bodies" 2>/dev/null)
+has "stop reports the recording to the panel" "$B" '"metrica":"reuniao_gravada","valor":1,'
+has "stop reports its minutes (12.5 s from ffprobe)" "$B" '"metrica":"minutos_gravados","valor":0.2,'
+has "a meeting recording is reported as a meeting" "$B" '"alvo":"reuniao","metrica":"reuniao_gravada"'
+lacks "the title never reaches the panel" "$B" "Zqxwv"
+for _ in $(seq 1 20); do [ -e "$ROOT/hook-arg" ] && break; sleep 0.5; done
+[ -e "$ROOT/hook-arg" ] && ok "the hook still runs after the signal" || fail "the hook still runs after the signal"
+scenario; rm -f "$ROOT/hook-arg"; echo 000 > "$STUB/curl_code"
+conf "TITLE='Zqxwv call'" "POST_RECORDING='$ROOT/hook.sh'" "PROJETOS_SINAL_URL='http://panel.invalid'" "PROJETOS_SINAL_SECRET='FAKE-SECRET-zqv'"
+run start >/dev/null; S=$(run stop)
+has "a panel that is down does not change the verdict" "$S" "verdict=SAVED"
+for _ in $(seq 1 20); do [ -e "$ROOT/hook-arg" ] && break; sleep 0.5; done
+[ -e "$ROOT/hook-arg" ] && ok "a panel that is down does not stop the hook" || fail "a panel that is down does not stop the hook"
+F=$(printf '%s
+' "$S" | sed -n 's/^#state .* file=//p')
+same "a panel that is down leaves the video alone" "$(cat "$F")" "mkv"
+same "a panel that is down keeps both signals queued" "$(wc -l < "$ROOT/home/.ipsio/signals.jsonl" | tr -d ' ')" "2"
 
 # A file still being closed after SIGINT is waited for while it grows, not killed at 5 s.
 scenario; touch "$STUB/slow_close"; run start >/dev/null

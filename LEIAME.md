@@ -155,6 +155,7 @@ Mac e a agenda estiverem no mesmo fuso.
 | `CALENDAR_MACOS` | vazio | `1` lê o app Calendário do Mac (acima) |
 | `CALENDAR_COMMAND` | vazio | fonte por comando (acima) |
 | `POST_RECORDING` | vazio | comando rodado depois de cada gravação salva, com o `.mkv` em `$1` (veja abaixo) |
+| `PROJETOS_SINAL_*` | vazio | reportar cada gravação a um painel de escritório (veja abaixo) |
 
 ### Depois de cada gravação
 
@@ -168,6 +169,38 @@ espera por eles. Cada gravação é entregue uma vez só (parar de novo não rod
 outra vez), e o trecho de 10 s do **Testar agora** nunca é.
 
     POST_RECORDING='~/bin/transcrever.sh'
+
+### Reportar cada gravação a um painel de escritório
+
+Opcional, para um escritório que tem um painel com a rota `/projetos/sinal`.
+Depois do `.sha256` e antes do `POST_RECORDING`, cada gravação salva vira duas
+medidas (`tipo=operacao`): `reuniao_gravada` (1) e `minutos_gravados`. Ainda
+não há `reuniao_transcrita`, porque o Ipsio não transcreve.
+
+| Chave (conf ou ambiente) | O que é |
+|---|---|
+| `PROJETOS_SINAL_URL` | o endereço base do painel; o sinal vai para `<base>/projetos/sinal` |
+| `PROJETOS_SINAL_SECRET` | vai no cabeçalho `X-Projetos-Secret`, pela entrada do curl, nunca impresso |
+| `PROJETOS_SINAL_DESLIGADO` | `1` = kill switch: nada entra na fila nem sai |
+| `PROJETOS_SINAL_SAL` | sal opcional do `meta.caso_hash` (abaixo) |
+
+O que nunca sai: o nome do arquivo, o título e a pasta (o nome de uma reunião
+pode trazer o nome de uma pessoa). A referência (`ref`) é o SHA-256 da
+gravação, o mesmo do `.sha256`, em grupos de 8 separados por `:`. O hex puro é
+recusado pelo painel cerca de uma vez em 18, porque uma sequência de 11 ou 14
+dígitos parece CPF/CNPJ lá. A `idempotencia` é `ipsio:<métrica>:<sha>`, então
+um reenvio conta uma vez. Quando o nome da gravação tem um número CNJ de
+processo e `PROJETOS_SINAL_SAL` está definido, `meta.caso_hash` é
+`sha256(sal + os 20 dígitos)`, agrupado do mesmo jeito: o número nunca sai, e
+o painel acha o caso fazendo o mesmo hash da lista dele com o mesmo sal. Sem
+sal, não há `caso_hash`.
+
+Todo sinal é gravado antes em `~/.ipsio/signals.jsonl` e depois enviado: 200
+sai da fila, 400 (recusado) é descartado, o resto (sem rede, 403, 409, 5xx)
+fica para a próxima gravação ou para `ipsio signals`, que drena a fila e diz o
+que sobrou. Sem o endereço e o segredo, a fila só cresce. Cada envio, recusa e
+descarte vai para `~/.ipsio/signals.log`. Um sinal que falha nunca toca no
+vídeo nem impede o `POST_RECORDING`.
 
 As chaves ficam em inglês nas duas línguas; o menu e as mensagens trocam.
 
@@ -205,6 +238,8 @@ desenhadas em [`docs/DESIGN.md`](docs/DESIGN.md), ainda sem código.
 ## Desenvolver
 
     bash tests/test-ipsio.sh      # o script, com dublês: roda no Linux e no Mac
+    bash tests/test-signals.sh    # o sinal ao painel de escritório, com um curl dublê (sem rede)
+    bash tests/signal-mutants.sh  # planta defeitos no sinal e exige que a bancada reprove cada um
     swiftc -parse-as-library app/Schedule.swift tests/ScheduleTests.swift -o /tmp/t && /tmp/t
     bash tests/mutants.sh         # planta defeitos na agenda e exige que a bancada reprove cada um
 

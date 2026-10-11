@@ -159,6 +159,7 @@ menu. It is right as long as the Mac and the calendar share a time zone.
 | `CALENDAR_MACOS` | empty | `1` reads the Mac Calendar app (above) |
 | `CALENDAR_COMMAND` | empty | command source (above) |
 | `POST_RECORDING` | empty | command run after each saved recording, with the `.mkv` as `$1` (see below) |
+| `PROJETOS_SINAL_*` | empty | report each recording to an office panel (see below) |
 
 ### After each recording
 
@@ -172,6 +173,38 @@ recording is handed over once (stopping again does not re-run it), and the
 10-second take of **Test now** never is.
 
     POST_RECORDING='~/bin/transcribe.sh'
+
+### Reporting each recording to an office panel
+
+Optional, for an office that runs a panel with a `/projetos/sinal` endpoint.
+After the `.sha256` and before `POST_RECORDING`, each saved recording becomes
+two measures (`tipo=operacao`): `reuniao_gravada` (1) and `minutos_gravados`.
+There is no `reuniao_transcrita` yet, because Ipsio does not transcribe.
+
+| Key (conf or environment) | What it is |
+|---|---|
+| `PROJETOS_SINAL_URL` | the panel's base address; the signal goes to `<base>/projetos/sinal` |
+| `PROJETOS_SINAL_SECRET` | sent in the `X-Projetos-Secret` header, through curl's stdin, never printed |
+| `PROJETOS_SINAL_DESLIGADO` | `1` = kill switch: nothing is queued or sent |
+| `PROJETOS_SINAL_SAL` | optional salt for `meta.caso_hash` (below) |
+
+What never leaves: the file name, the title and the folder (a meeting name
+may carry a person's name). The reference (`ref`) is the recording's SHA-256,
+the same one in the `.sha256` file, in groups of 8 joined by `:`. Plain hex is
+refused by the panel about one time in 18, because a run of 11 or 14 digits
+reads as a CPF/CNPJ there. `idempotencia` is `ipsio:<metric>:<sha>`, so a
+resend counts once. When the recording name holds a CNJ lawsuit number and
+`PROJETOS_SINAL_SAL` is set, `meta.caso_hash` is `sha256(salt + the 20
+digits)`, grouped the same way: the number itself never leaves, and the panel
+finds the case by hashing its own list with the same salt. With no salt there
+is no `caso_hash`.
+
+Every signal is first written to `~/.ipsio/signals.jsonl` and then sent: 200
+leaves the queue, 400 (refused) is dropped, anything else (no network, 403,
+409, 5xx) stays for the next recording or for `ipsio signals`, which drains
+the queue and says what is left. Without the address and the secret the queue
+just grows. Every send, refusal and drop goes to `~/.ipsio/signals.log`. A
+signal that fails never touches the video nor stops `POST_RECORDING`.
 
 ## Permissions and signing
 
@@ -207,6 +240,8 @@ in [`docs/DESIGN.md`](docs/DESIGN.md), with no code yet.
 ## Develop
 
     bash tests/test-ipsio.sh      # the script, with test doubles: runs on Linux and macOS
+    bash tests/test-signals.sh    # the signal to an office panel, with a curl double (no network)
+    bash tests/signal-mutants.sh  # plants defects in the signal; each must fail its bench
     swiftc -parse-as-library app/Schedule.swift tests/ScheduleTests.swift -o /tmp/t && /tmp/t
     swiftc -parse-as-library app/Engine/*.swift tests/EngineTests.swift -o /tmp/e && /tmp/e   # native engine
     bash tests/mutants.sh         # plants defects in the calendar and the engine; each must fail its bench
