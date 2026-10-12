@@ -19,7 +19,7 @@ takes for that not to happen, and checks while it records:
 | What goes wrong | How it shows | What Ipsio does |
 |---|---|---|
 | Recording with Shift+Cmd+5 / QuickTime | 8 h of video, 228 GB, zero audio | records through the BlackHole driver |
-| Changing only the system output | Zoom sends sound to the speaker IT picked; a whole morning at -91 dB | the speaker inside Zoom/Teams is the `Ipsio` device; the meter flags it within 90 s |
+| Changing only the system output | Zoom sends sound to the speaker IT picked (so does Meet); a whole morning at -91 dB | the speaker inside Zoom/Teams/Meet is the `Ipsio` device; the meter flags it within 90 s |
 | Checking "there is an audio track" | the track existed, and was silent | measures VOLUME, one sample per second, in the same ffmpeg that records |
 | Finding the silence at the end | hours of nothing | yellow icon and an alert after 90 s of silence |
 | Microphone without permission | macOS raises no error: it delivers digital silence | microphone below -80 dB = dead (a voice is near -32 dB, an empty room near -60); alert within 90 s |
@@ -67,12 +67,20 @@ offers **Test now (20 s)**: records, the Mac speaks a sentence, measures,
 deletes and gives the verdict (in meeting mode it also checks the microphone).
 
 One step only you can do: in Zoom, gear, Audio, Speaker = `Ipsio`; in Teams,
-Settings, Devices. Meet in the browser follows the system output, which Ipsio
-switches by itself while recording.
+Settings, Devices; in Google Meet, once in the call, Settings, Audio, Speakers
+= `Ipsio`. Meet does NOT follow the system output: measured in real use, it
+picks its own sound output, and Ipsio switching the system output while
+recording is not enough.
 
 The window opens again at launch whenever something required goes missing,
 and any time from the menu, **Check setup**. From Terminal: `ipsio doctor`
-(exit 0 only when complete).
+(exit 0 only when complete). `doctor` also WARNS, without refusing and without
+changing the exit code, about two things that cost recordings: the macOS
+automatic login turned off (after a restart for an update or a power cut the
+Mac waits at the login window, and nothing records until someone logs in) and
+another recorder alive (an ffmpeg capturing through avfoundation outside
+Ipsio, or an older script such as `aula-grava.sh`): two programs reading
+BlackHole at once can leave one of them silent.
 
 ## Use
 
@@ -159,6 +167,7 @@ menu. It is right as long as the Mac and the calendar share a time zone.
 | `CALENDAR_MACOS` | empty | `1` reads the Mac Calendar app (above) |
 | `CALENDAR_COMMAND` | empty | command source (above) |
 | `POST_RECORDING` | empty | command run after each saved recording, with the `.mkv` as `$1` (see below) |
+| `ON_ALARM` | empty | command run when an alarm goes off, with the reason as `$1` and the recording as `$2` (see below) |
 | `PROJETOS_SINAL_*` | empty | report each recording to an office panel (see below) |
 
 ### After each recording
@@ -170,9 +179,30 @@ or a copy to another disk plug in here. Both run in the background, with their
 output in `~/.ipsio/post-recording.log` (with the exit code); a failing command
 never touches the video, and stopping a recording never waits for them. Each
 recording is handed over once (stopping again does not re-run it), and the
-10-second take of **Test now** never is.
+10-second take of **Test now** never is. A cut file, whose duration ffprobe
+cannot read (**FILE DOES NOT OPEN**), also gets its `.sha256` and goes to
+`POST_RECORDING`: it is the one that most needs evidence.
 
     POST_RECORDING='~/bin/transcribe.sh'
+
+### When an alarm goes off
+
+The yellow icon and the alert only help someone looking at the Mac. If
+`ON_ALARM` is set, it runs on each alarm, once per episode, with the reason as
+`$1` and the recording in progress as `$2`; a phone notification plugs in here.
+
+| Reason (`$1`) | When |
+|---|---|
+| `silence` | 90 s in a row with no computer sound |
+| `microphone` | 90 s in a row of a dead microphone, in meeting mode |
+| `died` | the recorder stopped by itself (disk full, power, error) |
+
+It runs in the background, with its output and exit code in
+`~/.ipsio/alarm.log`; a failing command changes nothing in the recording.
+Without `ON_ALARM`, nothing runs. From Terminal, `ipsio alarm silence` fires
+the command by hand, to test it.
+
+    ON_ALARM='~/bin/notify-phone.sh'
 
 ### Reporting each recording to an office panel
 
