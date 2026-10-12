@@ -356,7 +356,15 @@ kill "$P" 2>/dev/null; rm -f "$STUB/foreign"
 scenario; conf "MODE='meeting'"
 run start >/dev/null
 has "meeting meter reads the computer branch" "$(cat "$STUB/ffmpeg-args")" "[s3]asetnsamples"
-lacks "meeting meter does not read the mix" "$(cat "$STUB/ffmpeg-args")" "[met]"
+# The label the meter reads must come from the split of the COMPUTER input,
+# and the mix must never feed a meter (the old check looked for a "[met]"
+# label that no version ever had, so it could not fail).
+has "meeting meter's branch is split from the computer input" "$(cat "$STUB/ffmpeg-args")" "[0:a]aresample=48000:async=1000,aformat=channel_layouts=stereo,asplit=3[s1][s2][s3]"
+lacks "meeting meter does not read the mix" "$(cat "$STUB/ffmpeg-args")" "[mix]asetnsamples"
+lacks "the mix is not split into a meter" "$(cat "$STUB/ffmpeg-args")" "normalize=0,asplit"
+# Track order is a contract for every tool that reads the file by index:
+# 1 = mix, 2 = computer (the others), 3 = microphone (you).
+has "meeting tracks are video, mix, computer, microphone, in that order" "$(cat "$STUB/ffmpeg-args")" "-map 0:v -map [mix] -map [s2] -map [m2] -c:v"
 run stop >/dev/null
 
 scenario; echo "Ipsio" > "$STUB/current_output"
