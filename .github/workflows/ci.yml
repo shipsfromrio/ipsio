@@ -30,7 +30,7 @@ jobs:
       - name: build the app, ipsio-calendar and the device creator
         run: |
           swiftc --version
-          swiftc -O -parse-as-library app/Schedule.swift app/MacCalendar.swift app/Setup.swift app/SetupWindow.swift app/Ipsio.swift -framework AppKit -o "$RUNNER_TEMP/Ipsio"
+          swiftc -O -parse-as-library app/Schedule.swift app/MacCalendar.swift app/Setup.swift app/SetupWindow.swift app/Tooltip.swift app/Ipsio.swift -framework AppKit -o "$RUNNER_TEMP/Ipsio"
           swiftc -O -parse-as-library app/Schedule.swift app/MacCalendar.swift app/CalendarCLI.swift -o "$RUNNER_TEMP/ipsio-calendar"
           swiftc -O tools/create-device.swift -o "$RUNNER_TEMP/create-device"
       - name: calendar bench
@@ -41,6 +41,10 @@ jobs:
         run: |
           swiftc -parse-as-library app/Setup.swift tests/SetupTests.swift -o "$RUNNER_TEMP/setup-tests"
           "$RUNNER_TEMP/setup-tests"
+      - name: tooltip bench
+        run: |
+          swiftc -parse-as-library app/Tooltip.swift tests/TooltipTests.swift -o "$RUNNER_TEMP/tooltip-tests"
+          "$RUNNER_TEMP/tooltip-tests"
       - name: native engine bench
         run: |
           swiftc -parse-as-library app/Engine/*.swift tests/EngineTests.swift -o "$RUNNER_TEMP/engine-tests"

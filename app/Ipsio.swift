@@ -557,10 +557,16 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         }
     }
 
+    // Hover text on the icon: the app's name and what it is doing (Tooltip.swift).
+    func setTooltip(_ on: Bool) {
+        item.button?.toolTip = Tooltip.text(lang: lang, recording: on, mode: mode, meeting: on ? readMarker()?.title : nil)
+    }
+
     func refresh() {
         Schedule.lang = lang
         if waitingPermission { return }
         let on = recording()
+        setTooltip(on)
         if !on {
             icon("record.circle", color: nil)
             statusItem.title = !CGPreflightScreenCaptureAccess() ? t("stopped_no_perm") : (!micOk() ? t("stopped_no_mic") : t("stopped"))
@@ -650,6 +656,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         let meeting = s.state["mode"] == "meeting"
         let micSilence = Int(s.state["mic_silence"] ?? "") ?? 0
         let time = s.state["time"] ?? "", size = s.state["size"] ?? "", diskH = s.state["disk_h"] ?? ""
+        setTooltip(true)
         let alarm = verdict == "NO_SOUND" && silentSeconds >= silenceThreshold
         let micAlarm = meeting && micSilence >= silenceThreshold
         if alarm || micAlarm {
