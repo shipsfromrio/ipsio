@@ -118,6 +118,11 @@ chmod +x "$BIN"/*
 
 # scenario: clean state and a "good" Mac (everything present).
 scenario() {
+  # The previous scenario's after_save (hash, signal, hook) runs in the
+  # background: wiping home under it let its "class" signals land in the next
+  # scenario's queue, and the meeting check read them (issue #11, red on main
+  # since 11/10/2026). Wait for it, up to 20 s.
+  for _ in $(seq 1 100); do pgrep -f "$SCRIPT" >/dev/null 2>&1 || break; sleep 0.2; done
   rm -rf "${ROOT:?}/home" "${STUB:?}"/*; mkdir -p "$ROOT/home/.ipsio" "$STUB"
   cat > "$STUB/devices" <<'EOF'
 [AVFoundation indev @ 0x1] AVFoundation video devices:
