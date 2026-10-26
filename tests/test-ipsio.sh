@@ -117,7 +117,15 @@ EOF2
 chmod +x "$BIN"/*
 
 # scenario: clean state and a "good" Mac (everything present).
+# It first waits for the previous scenario's background work (after_save:
+# hash, panel signal, hook) to end. On the macOS runner that work outlived the
+# wipe below and wrote a CLASS recording's signal into the next scenario's
+# $STUB/bodies, so "a meeting recording is reported as a meeting" failed on a
+# correct script (#11). Up to 30 s; a straggler past that fails the bench.
 scenario() {
+  local _i
+  for _i in $(seq 1 60); do pgrep -f "$SCRIPT" >/dev/null 2>&1 || break; sleep 0.5; done
+  if pgrep -f "$SCRIPT" >/dev/null 2>&1; then fail "the previous scenario's background work ends within 30 s" "$(pgrep -fl "$SCRIPT")"; fi
   rm -rf "${ROOT:?}/home" "${STUB:?}"/*; mkdir -p "$ROOT/home/.ipsio" "$STUB"
   cat > "$STUB/devices" <<'EOF'
 [AVFoundation indev @ 0x1] AVFoundation video devices:
