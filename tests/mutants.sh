@@ -70,6 +70,22 @@ engine_mutant Files.swift "evidence stops at the first block" 'hasher.update(dat
 engine_mutant Files.swift "collision overwrites" 'while exists(out) {' 'while false && exists(out) {'
 engine_mutant Writer.swift "no fragments: a crash loses the file" 'writer.movieFragmentInterval = CMTime(seconds: s.fragment, preferredTimescale: 600)' ''
 engine_mutant Writer.swift "the microphone track is never added" 'micIn = s.microphone ? AVAssetWriterInput' 'micIn = false ? AVAssetWriterInput'
+# The menu bar tooltip, against tests/TooltipTests.swift.
+tooltip_mutant() { # <name> <original text> <broken text>
+  python3 - "$ROOT/app/Tooltip.swift" "$T/Tooltip.swift" "$2" "$3" <<'PY2' || { echo "ERROR: the snippet for mutant '$1' is no longer in Tooltip.swift"; ALIVE=$((ALIVE+1)); return; }
+import sys
+src, dst, a, b = sys.argv[1:5]
+s = open(src, encoding="utf-8").read()
+if a not in s: sys.exit(1)
+open(dst, "w", encoding="utf-8").write(s.replace(a, b, 1))
+PY2
+  if ! swiftc -parse-as-library "$T/Tooltip.swift" "$ROOT/tests/TooltipTests.swift" -o "$T/tt" 2>"$T/err"; then
+    echo "ERROR: mutant '$1' does not compile"; tail -3 "$T/err"; ALIVE=$((ALIVE+1)); return; fi
+  if "$T/tt" >/dev/null 2>&1; then echo "SURVIVED: $1"; ALIVE=$((ALIVE+1)); else echo "killed: $1"; fi
+}
+tooltip_mutant "meeting reads as class" 'if mode == "meeting" { return' 'if mode == "nothing" { return'
+tooltip_mutant "calendar meeting name dropped" '!m.isEmpty {' 'false {'
+tooltip_mutant "idle claims to record" 'guard recording else {' 'guard !recording else {'
 echo
 [ "$ALIVE" -eq 0 ] && echo "all mutants killed" || echo "$ALIVE mutant(s) alive"
 [ "$ALIVE" -eq 0 ]
