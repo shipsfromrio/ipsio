@@ -18,6 +18,8 @@
 //   same for the microphone (90 s of a DEAD microphone, not of you being quiet);
 // - watches the recorder: a dead pid with the pid file still there = it
 //   stopped by itself (disk full, crash), and the app says so with the log tail;
+// - each of those alarms also runs the ON_ALARM hook from the conf, once per
+//   episode, through "ipsio.sh alarm <silence|microphone|died> <file>";
 // - on launch, if nothing is recording and the system output was left on
 //   Ipsio's device (app or Mac went down mid-recording), it gives the
 //   speakers back.
@@ -488,9 +490,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     /// With a deadline: a wedged ffmpeg (device enumeration, a hung
     /// screencapture) used to hold "busy" forever, and with it every calendar
     /// start and stop. check decodes the whole file, so it gets longer.
-    func run(_ cmd: String, env: [String: String] = [:]) -> String {
+    func run(_ cmd: String, _ args: [String] = [], env: [String: String] = [:]) -> String {
         let limit: TimeInterval = cmd == "check" ? 1800 : 180
-        let r = Runner.run("/bin/bash", [script, cmd], env: env.isEmpty ? nil : ProcessInfo.processInfo.environment.merging(env) { _, b in b }, limit: limit)
+        let r = Runner.run("/bin/bash", [script, cmd] + args, env: env.isEmpty ? nil : ProcessInfo.processInfo.environment.merging(env) { _, b in b }, limit: limit)
         if let e = r.launchError { return "COULD NOT RUN THE SCRIPT\n\(script): \(e)" }
         if r.timedOut { return t("script_timeout_title") + "\n" + t("script_timeout_body", cmd, String(Int(limit))) + "\n#state verdict=TIMEOUT" }
         return r.out
@@ -614,6 +616,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         if diedByItself() {
             let log = logTail()
             try? FileManager.default.removeItem(atPath: pidPath)   // a single alert
+            hookAlarm("died", file: currentFile())                 // before stop forgets the file
             busy = true
             DispatchQueue.global().async {
                 _ = self.run("stop")                               // gives the sound back
@@ -673,13 +676,23 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         recordItem.isEnabled = false; stopItem.isEnabled = !busy; checkItem.isEnabled = true; testItem.isEnabled = false
         if alarm && !alarmGiven {
             alarmGiven = true
+            hookAlarm("silence")
             alert(t("alarm_title", String(silentSeconds)),
                   s.body.components(separatedBy: "\n").filter { !$0.contains("\(silentSeconds) s") }.joined(separator: "\n"))
         }
         if micAlarm && !micAlarmGiven {
             micAlarmGiven = true
+            hookAlarm("microphone")
             alert(t("mic_alarm_title", String(micSilence)), t("mic_alarm_body"))
         }
+    }
+
+    /// ON_ALARM (conf): once per alarm episode, the script runs the hook in the
+    /// background with the reason and the recording. Off the main thread: run
+    /// waits for the script, and the alarm must not freeze the menu.
+    func hookAlarm(_ reason: String, file: String? = nil) {
+        let f = file ?? currentFile() ?? ""
+        DispatchQueue.global().async { _ = self.run("alarm", [reason, f]) }
     }
 
     func logTail() -> String {

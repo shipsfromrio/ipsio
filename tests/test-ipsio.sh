@@ -65,7 +65,8 @@ exec perl -e '$SIG{INT}=sub{exit 0}; $SIG{TERM}=sub{exit 0}; sleep 1 while 1'
 EOF
 cat > "$BIN/ffprobe" <<'EOF'
 #!/bin/bash
-case "$*" in *format=duration*) echo 12.5;; *codec_name*) echo codec_name=aac;; esac
+# $STUB/no_duration: a cut file, whose duration ffprobe cannot read.
+case "$*" in *format=duration*) [ -f "$STUB/no_duration" ] || echo 12.5;; *codec_name*) echo codec_name=aac;; esac
 EOF
 cat > "$BIN/SwitchAudioSource" <<'EOF'
 #!/bin/bash
@@ -89,11 +90,18 @@ EOF
 printf '#!/bin/bash\necho "Now drawing from '"'"'AC Power'"'"'"\n' > "$BIN/pmset"
 printf '#!/bin/bash\nexit 0\n' > "$BIN/caffeinate"
 printf '#!/bin/bash\nexit 0\n' > "$BIN/say"
-printf '#!/bin/bash\nexit 1\n' > "$BIN/defaults"
+# defaults: no system language; automatic login only when $STUB/autologin exists.
+cat > "$BIN/defaults" <<'EOF'
+#!/bin/bash
+case "$*" in *autoLoginUser*) [ -f "$STUB/autologin" ] && exec cat "$STUB/autologin";; esac
+exit 1
+EOF
 # ps: "-p PID -o args=" answers like the real one for the recorder double
 # (an ffmpeg), or as a stranger when $STUB/foreign exists (pid reused).
+# "-axo pid=,args=" lists $STUB/ps_list (every process, for doctor).
 cat > "$BIN/ps" <<'EOF'
 #!/bin/bash
+[ "$1" = "-axo" ] && { cat "$STUB/ps_list" 2>/dev/null; exit 0; }
 [ "$1" = "-p" ] || exit 1
 kill -0 "$2" 2>/dev/null || exit 1
 if [ -f "$STUB/foreign" ]; then echo "/usr/sbin/someone-else"; else echo "/opt/homebrew/bin/ffmpeg -nostdin"; fi
@@ -148,6 +156,8 @@ run() {
   local sub="$1"; shift
   env -i HOME="$ROOT/home" PATH="$BIN:/usr/bin:/bin" STUB="$STUB" TMPDIR="$ROOT" "$@" bash "$SCRIPT" "$sub" 2>&1
 }
+# run_args <subcommand> [args...]: the same, with arguments instead of variables.
+run_args() { env -i HOME="$ROOT/home" PATH="$BIN:/usr/bin:/bin" STUB="$STUB" TMPDIR="$ROOT" bash "$SCRIPT" "$@" 2>&1; }
 # conf [lines...]: the conf file; Portuguese unless a line sets UI_LANGUAGE.
 conf() { { printf '%s\n' "$@"; case "$*" in *UI_LANGUAGE=*) ;; *) echo "UI_LANGUAGE='pt'";; esac; } > "$ROOT/home/.ipsio/conf"; }
 
@@ -188,6 +198,7 @@ scenario; conf "MODE='meeting'"
 S=$(run start)
 has "meeting records" "$S" "verdict=RECORDING mode=meeting microphone=OK"
 has "meeting opens the default input by the right index" "$(cat "$STUB/ffmpeg-args")" "-i :2"
+same "each avfoundation input of a meeting has a deep queue (screen+sound, microphone)" "$(grep -o -- '-thread_queue_size 1024 -f avfoundation' "$STUB/ffmpeg-args" | wc -l | tr -d ' ')" "2"
 has "meeting has a microphone meter" "$(cat "$STUB/ffmpeg-args")" "level-mic"
 same "start switches the output to Ipsio's device" "$(cat "$STUB/current_output")" "Ipsio"
 N=$(run level)
@@ -253,6 +264,61 @@ F=$(printf '%s
 ' "$S" | sed -n 's/^#state .* file=//p')
 same "a panel that is down leaves the video alone" "$(cat "$F")" "mkv"
 same "a panel that is down keeps both signals queued" "$(wc -l < "$ROOT/home/.ipsio/signals.jsonl" | tr -d ' ')" "2"
+
+# A cut file (ffprobe reads no duration) is the one that most needs evidence:
+# it gets its .sha256 and goes to the hook like any saved recording.
+scenario; rm -f "$ROOT/hook-arg"; touch "$STUB/no_duration"
+printf '#!/bin/bash\nprintf %%s "$1" > "%s/hook-arg"\n' "$ROOT" > "$ROOT/hook.sh"; chmod +x "$ROOT/hook.sh"
+conf "POST_RECORDING='$ROOT/hook.sh'"
+run start >/dev/null; S=$(run stop)
+has "a file with no duration does not open" "$S" "verdict=DOES_NOT_OPEN"
+F=$(printf '%s\n' "$S" | sed -n 's/^#state .* file=//p')
+for _ in $(seq 1 40); do [ -e "$ROOT/hook-arg" ] && [ -s "$F.sha256" ] && break; sleep 0.5; done
+same "a cut file gets its .sha256 too" "$(cat "$F.sha256" 2>/dev/null)" "$(openssl dgst -sha256 -r "$F" | awk '{print $1}')  $(basename "$F")"
+same "a cut file is handed to the hook too" "$(cat "$ROOT/hook-arg" 2>/dev/null)" "$F"
+
+# ON_ALARM: the app calls "alarm <reason> <file>" once per alarm; the hook runs
+# in the background with the reason as $1 and the recording as $2.
+scenario; rm -f "$ROOT/alarm-arg"
+printf '#!/bin/bash\nsleep 3; printf "%%s|%%s" "$1" "$2" > "%s/alarm-arg"\n' "$ROOT" > "$ROOT/alarm.sh"; chmod +x "$ROOT/alarm.sh"
+conf "ON_ALARM='$ROOT/alarm.sh'"
+run start >/dev/null; F=$(cat "$ROOT/home/.ipsio/file")
+S=$(run_args alarm silence)
+has "alarm runs the hook" "$S" "verdict=ALARM reason=silence hook=1"
+[ -e "$ROOT/alarm-arg" ] && fail "alarm returns without waiting for the hook" || ok "alarm returns without waiting for the hook"
+for _ in $(seq 1 40); do [ -e "$ROOT/alarm-arg" ] && break; sleep 0.5; done
+same "the alarm hook gets the reason and the recording" "$(cat "$ROOT/alarm-arg" 2>/dev/null)" "silence|$F"
+for _ in $(seq 1 20); do grep -q 'rc=' "$ROOT/home/.ipsio/alarm.log" 2>/dev/null && break; sleep 0.5; done
+has "the alarm hook run is logged" "$(cat "$ROOT/home/.ipsio/alarm.log" 2>/dev/null)" "ON_ALARM rc=0"
+run stop >/dev/null; rm -f "$ROOT/alarm-arg"
+run_args alarm died "$ROOT/cut.mkv" >/dev/null
+for _ in $(seq 1 40); do [ -e "$ROOT/alarm-arg" ] && break; sleep 0.5; done
+same "a dead recorder's alarm names the file the app passed" "$(cat "$ROOT/alarm-arg" 2>/dev/null)" "died|$ROOT/cut.mkv"
+scenario; conf "ON_ALARM='false'"
+run_args alarm microphone >/dev/null
+for _ in $(seq 1 20); do grep -q 'rc=' "$ROOT/home/.ipsio/alarm.log" 2>/dev/null && break; sleep 0.5; done
+has "a failing alarm hook is logged" "$(cat "$ROOT/home/.ipsio/alarm.log" 2>/dev/null)" "ON_ALARM rc=1"
+scenario
+has "no alarm hook configured, the alarm says so" "$(run_args alarm silence)" "hook=0"
+sleep 1
+[ -e "$ROOT/home/.ipsio/alarm.log" ] && fail "no alarm hook configured, nothing run" || ok "no alarm hook configured, nothing run"
+scenario; rm -f "$ROOT/alarm-arg"; conf "ON_ALARM='$ROOT/alarm.sh'"
+has "an unknown alarm reason is refused" "$(run_args alarm whatever)" "verdict=BAD_ALARM"
+sleep 4
+[ -e "$ROOT/alarm-arg" ] && fail "an unknown alarm reason runs nothing" || ok "an unknown alarm reason runs nothing"
+
+# The 90 s alarm: level counts the seconds of silence at the end of the meter
+# (one sample per second); the app raises the alarm at 90 of them (checked
+# below, in app/Ipsio.swift, which is AppKit and does not build here).
+meter_lines() { for _ in $(seq 1 "$1"); do echo "lavfi.astats.Overall.RMS_level=$2"; done; }
+scenario; run start >/dev/null
+{ meter_lines 30 -20; meter_lines 89 -inf; } > "$ROOT/home/.ipsio/level"
+has "89 s of silence at the end count as 89" "$(run level)" "verdict=NO_SOUND mode=class silence=89 "
+meter_lines 1 -70 >> "$ROOT/home/.ipsio/level"
+has "one more silent second counts as 90" "$(run level)" "verdict=NO_SOUND mode=class silence=90 "
+meter_lines 1 -20 >> "$ROOT/home/.ipsio/level"
+has "sound again resets the count" "$(run level)" "verdict=OK mode=class silence=0 "
+run stop >/dev/null
 
 # A file still being closed after SIGINT is waited for while it grows, not killed at 5 s.
 scenario; touch "$STUB/slow_close"; run start >/dev/null
@@ -333,6 +399,7 @@ S=$(run start IPSIO_MODE=class IPSIO_TITLE='Reunião: a/b')
 has "IPSIO_MODE overrides the conf" "$S" "mode=class"
 has "calendar title goes into the name, with no / or :" "$S" "Reunião- a-b.mkv"
 lacks "class opens no microphone meter" "$(cat "$STUB/ffmpeg-args")" "level-mic"
+same "the avfoundation input of a class has a deep queue" "$(grep -o -- '-thread_queue_size 1024 -f avfoundation' "$STUB/ffmpeg-args" | wc -l | tr -d ' ')" "1"
 lacks "level in class says nothing about the microphone" "$(run level)" "mic="
 run stop >/dev/null
 S=$(run start IPSIO_TITLE='Reunião: a/b')
@@ -437,6 +504,33 @@ has "doctor counts the Mac's Calendar as a source" "$(run doctor)" "calendar=mac
 lacks "doctor never prints the calendar address" "$D" "example.com"
 has "doctor speaks English when asked" "$D" "SETUP COMPLETE"
 
+# doctor warns, never refuses: with automatic login off, a Mac that restarts
+# waits at the login window and records nothing; another recorder alive can
+# leave one of the two BlackHole readers silent.
+scenario
+D=$(run doctor); rc=$?
+has "doctor warns when automatic login is off" "$D" "warn=autologin"
+has "doctor explains the automatic login warning" "$D" "login automático está desligado"
+same "a warning does not make the setup incomplete" "$rc" "0"
+has "a warning is not a missing item" "$D" "verdict=SETUP_OK mode=class missing= "
+scenario; echo "someone" > "$STUB/autologin"
+lacks "automatic login on, no warning" "$(run doctor)" "autologin"
+printf '4242 /opt/homebrew/bin/ffmpeg -nostdin -f avfoundation -i 1:0 /tmp/x.mkv\n' > "$STUB/ps_list"
+D=$(run doctor); rc=$?
+has "doctor warns about another ffmpeg capturing" "$D" "warn=other_recorder"
+has "doctor names the other recorder's pid" "$D" "pid 4242"
+same "another recorder does not make the setup incomplete" "$rc" "0"
+printf '777 /bin/bash /Users/x/bin/aula-grava.sh\n' > "$STUB/ps_list"
+has "doctor warns about an older recording script" "$(run doctor)" "warn=other_recorder"
+printf '888 /opt/homebrew/bin/ffmpeg -nostdin -hide_banner -f avfoundation -list_devices true -i\n999 /usr/bin/vim notes.txt\n' > "$STUB/ps_list"
+lacks "a device listing or another program is not a recorder" "$(run doctor)" "other_recorder"
+run start >/dev/null
+printf '%s /opt/homebrew/bin/ffmpeg -nostdin -y -f avfoundation -i 1:0 x.mkv\n' "$(cat "$ROOT/home/.ipsio/pid")" > "$STUB/ps_list"
+lacks "Ipsio's own recorder is not another recorder" "$(run doctor)" "other_recorder"
+run stop >/dev/null
+scenario; touch "$STUB/no_permission"
+has "warnings ride along an incomplete setup" "$(run doctor)" "missing=permission ok=dir,ffmpeg,blackhole,screen,switchaudio,device,folder,disk calendar=none warn=autologin"
+
 # ---------------------------------------------------------- pure functions ---
 # shellcheck source=/dev/null
 IPSIO_ONLY_FUNCTIONS=1 HOME="$ROOT/home" . "$SCRIPT"
@@ -480,6 +574,20 @@ BAD=$(awk '/func [A-Za-z]+\(/{ match($0, /func [A-Za-z]+/); f=substr($0, RSTART+
   /runModal\(\)/ && f !~ /^(modal|doTitle|doFolder|doConnectCalendar|connectICal)$/ { print f ":" NR }' "$APP")
 same "popups open only through modal() or a menu click" "$BAD" ""
 grep -q 'perform(#selector(self.runPendingModal)' "$APP" && ok "modal() opens through perform(selector)" || fail "modal() opens through perform(selector)"
+
+# ------------------------------------------------------------ app alarms ---
+# The app is AppKit and does not build on Linux, so these read its source: the
+# silence alarm fires at 90 s in a row (computer sound and microphone alike),
+# and each alarm, once per episode, hands its reason to ON_ALARM.
+grep -qE '^ +let silenceThreshold = 90$' "$APP" && ok "the silence alarm threshold is 90 s" || fail "the silence alarm threshold is 90 s"
+grep -qF 'let alarm = verdict == "NO_SOUND" && silentSeconds >= silenceThreshold' "$APP" && ok "the sound alarm fires at the threshold, not after it" || fail "the sound alarm fires at the threshold, not after it"
+grep -qF 'let micAlarm = meeting && micSilence >= silenceThreshold' "$APP" && ok "the microphone alarm fires at the threshold" || fail "the microphone alarm fires at the threshold"
+HOOKS=$(awk '/func [A-Za-z]+\(/{ match($0, /func [A-Za-z]+/); f=substr($0, RSTART+5, RLENGTH-5) }
+  /hookAlarm\("/{ match($0, /hookAlarm\("[a-z]+"/); print f ":" substr($0, RSTART+11, RLENGTH-12) }' "$APP" | tr '\n' ' ')
+same "ON_ALARM is called by the watcher and by each level alarm" "$HOOKS" "tick:died applyLevel:silence applyLevel:microphone "
+grep -A2 'if alarm && !alarmGiven {' "$APP" | grep -qF 'hookAlarm("silence")' && ok "the silence hook runs once per episode" || fail "the silence hook runs once per episode"
+grep -A2 'if micAlarm && !micAlarmGiven {' "$APP" | grep -qF 'hookAlarm("microphone")' && ok "the microphone hook runs once per episode" || fail "the microphone hook runs once per episode"
+grep -qF 'DispatchQueue.global().async { _ = self.run("alarm", [reason, f]) }' "$APP" && ok "the alarm hook runs off the main thread" || fail "the alarm hook runs off the main thread"
 
 # ------------------------------------------------------------- app texts ---
 # A key repeated in a Swift dictionary literal crashes the app at launch, and a

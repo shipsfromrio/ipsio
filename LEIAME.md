@@ -18,7 +18,7 @@ isso não acontecer, e confere enquanto grava:
 | O que dá errado | Como aparece | O que o Ipsio faz |
 |---|---|---|
 | Gravar com Shift+Cmd+5 / QuickTime | 8 h de vídeo, 228 GB, zero áudio | grava pelo driver BlackHole |
-| Trocar só a saída do sistema | o Zoom manda o som para o alto-falante que ELE escolheu; manhã inteira a -91 dB | o alto-falante dentro do Zoom/Teams é o dispositivo `Ipsio`; o medidor acusa em 90 s |
+| Trocar só a saída do sistema | o Zoom manda o som para o alto-falante que ELE escolheu (o Meet também); manhã inteira a -91 dB | o alto-falante dentro do Zoom/Teams/Meet é o dispositivo `Ipsio`; o medidor acusa em 90 s |
 | Conferir "tem faixa de áudio" | a faixa existia, e estava muda | mede VOLUME, uma amostra por segundo, no mesmo ffmpeg que grava |
 | A sua voz escondendo a faixa do computador muda | a mistura parece boa, os outros sumiram | o medidor, a conferência e o teste leem só a faixa do computador, nunca a mistura |
 | Descobrir o silêncio no fim | horas mudas | ícone amarelo e alerta com 90 s de silêncio |
@@ -65,12 +65,20 @@ oferece **Testar agora (20 s)**: grava, o Mac fala uma frase, mede, apaga e dá 
 veredito (no modo reunião confere também o microfone).
 
 Um passo só você faz: no Zoom, engrenagem, Áudio, Alto-falante = `Ipsio`; no
-Teams, Configurações, Dispositivos. O Meet no navegador segue a saída do
-sistema, que o Ipsio troca sozinho ao gravar.
+Teams, Configurações, Dispositivos; no Google Meet, já dentro da chamada,
+Configurações, Áudio, Alto-falantes = `Ipsio`. O Meet NÃO segue a saída do
+sistema: medido em uso real, ele escolhe a própria saída de som, e o Ipsio
+trocar a saída do sistema ao gravar não basta.
 
 A janela volta a abrir sozinha sempre que falta algo obrigatório, e a qualquer
 hora pelo menu, **Conferir a instalação**. No Terminal: `ipsio doctor` (sai 0 só
-com tudo completo).
+com tudo completo). O `doctor` também AVISA, sem recusar e sem mudar o código de
+saída, de duas coisas que custam gravação: o login automático do macOS
+desligado (depois de um reinício por atualização ou queda de energia o Mac para
+na tela de login, e nada grava até alguém entrar) e outro gravador vivo (um
+ffmpeg capturando pelo avfoundation fora do Ipsio, ou um script antigo como o
+`aula-grava.sh`): dois programas lendo o BlackHole ao mesmo tempo podem deixar
+um deles mudo.
 
 ## Usar
 
@@ -155,6 +163,7 @@ Mac e a agenda estiverem no mesmo fuso.
 | `CALENDAR_MACOS` | vazio | `1` lê o app Calendário do Mac (acima) |
 | `CALENDAR_COMMAND` | vazio | fonte por comando (acima) |
 | `POST_RECORDING` | vazio | comando rodado depois de cada gravação salva, com o `.mkv` em `$1` (veja abaixo) |
+| `ON_ALARM` | vazio | comando rodado quando um alarme dispara, com o motivo em `$1` e a gravação em `$2` (veja abaixo) |
 | `PROJETOS_SINAL_*` | vazio | reportar cada gravação a um painel de escritório (veja abaixo) |
 
 ### Depois de cada gravação
@@ -166,9 +175,30 @@ aqui que entram a transcrição ou a cópia para outro disco. Os dois rodam em
 segundo plano, com a saída em `~/.ipsio/post-recording.log` (com o código de
 saída); um comando que falha nunca mexe no vídeo, e parar a gravação nunca
 espera por eles. Cada gravação é entregue uma vez só (parar de novo não roda
-outra vez), e o trecho de 10 s do **Testar agora** nunca é.
+outra vez), e o trecho de 10 s do **Testar agora** nunca é. O arquivo cortado,
+cuja duração o ffprobe não lê (**ARQUIVO NÃO ABRE**), também ganha o `.sha256`
+e vai para o `POST_RECORDING`: é o que mais precisa de prova.
 
     POST_RECORDING='~/bin/transcrever.sh'
+
+### Quando um alarme dispara
+
+O ícone amarelo e o alerta só servem a quem está olhando para o Mac. Se houver
+`ON_ALARM`, ele roda a cada alarme, uma vez por episódio, com o motivo em `$1`
+e a gravação em andamento em `$2`; é por aqui que entra um aviso no celular.
+
+| Motivo (`$1`) | Quando |
+|---|---|
+| `silence` | 90 s seguidos sem som do computador |
+| `microphone` | 90 s seguidos de microfone mudo, no modo reunião |
+| `died` | o gravador parou sozinho (disco cheio, energia, erro) |
+
+Roda em segundo plano, com a saída e o código de saída em
+`~/.ipsio/alarm.log`; um comando que falha não muda nada na gravação. Sem
+`ON_ALARM`, nada roda. Do Terminal: `ipsio alarm silence` dispara o comando à
+mão, para testar.
+
+    ON_ALARM='~/bin/avisar-celular.sh'
 
 ### Reportar cada gravação a um painel de escritório
 

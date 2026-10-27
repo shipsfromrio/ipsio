@@ -1,8 +1,8 @@
 #!/bin/bash
 # ipsio.sh: records the SCREEN + the COMPUTER SOUND (through BlackHole) and,
 # in meeting mode, the MICROPHONE too, into a single .mkv.
-# Usage: start | level | check | status | stop | test | doctor | folder | title |
-#        output | device | language | mode | microphone
+# Usage: start | level | check | status | stop | test | doctor | alarm | folder |
+#        title | output | device | language | mode | microphone
 #
 # Every recording rule lives here; the Ipsio app only calls subcommands and
 # shows their output. Output speaks in two layers: first line = the verdict in
@@ -147,6 +147,8 @@ t() {
     doctor_item) echo "OK  $1";;
     doctor_calendar_none) echo "--  calendar: none connected (optional; menu > Connect calendar)";;
     doctor_calendar) echo "OK  calendar: $1";;
+    doctor_no_autologin) echo "!   automatic login is off: after a restart (update, power cut) the Mac waits at the login window and nothing records until someone logs in. System Settings > Users & Groups > Automatically log in as (needs FileVault off).";;
+    doctor_other_recorder) echo "!   another recorder is running (pid $1): two programs reading BlackHole at once can leave one of them silent. Stop it before Ipsio records.";;
   esac; else case "$k" in
     already_recording) echo "JÁ ESTÁ GRAVANDO"; echo "Há uma gravação em andamento. Pare antes de começar outra.";;
     no_blackhole) echo "SEM BLACKHOLE"; echo "O driver de áudio BlackHole não aparece nos dispositivos. Rode o install.sh de novo ou reinicie o Mac.";;
@@ -210,6 +212,8 @@ t() {
     doctor_item) echo "OK  $1";;
     doctor_calendar_none) echo "--  agenda: nenhuma conectada (opcional; menu > Conectar agenda)";;
     doctor_calendar) echo "OK  agenda: $1";;
+    doctor_no_autologin) echo "!   o login automático está desligado: depois de um reinício (atualização, queda de energia) o Mac para na tela de login e nada grava até alguém entrar. Ajustes do Sistema > Usuários e Grupos > Iniciar sessão automaticamente como (exige o FileVault desligado).";;
+    doctor_other_recorder) echo "!   outro gravador está rodando (pid $1): dois programas lendo o BlackHole ao mesmo tempo podem deixar um deles mudo. Pare-o antes de o Ipsio gravar.";;
   esac; fi
 }
 
@@ -334,6 +338,23 @@ after_save() {
       echo "$(date '+%F %T') POST_RECORDING rc=$rc"
     fi
   ) < /dev/null >> "$DIR/post-recording.log" 2>&1 &
+}
+# on_alarm <reason> [file]: the ON_ALARM hook from the conf. The app calls
+# "ipsio.sh alarm <reason> <file>" once per alarm episode: silence (no computer
+# sound for 90 s), microphone (a dead microphone for 90 s) or died (the
+# recorder stopped by itself). The hook gets the reason as $1 and the
+# recording, when known, as $2 (a phone notification or a page plugs in here:
+# nobody may be at the Mac to see the yellow icon). Same rules as
+# POST_RECORDING: in the background, every descriptor to $DIR/alarm.log with the
+# exit code, and a failing hook changes nothing. No ON_ALARM, nothing runs.
+on_alarm() {
+  [ -n "${ON_ALARM:-}" ] || return 0
+  (
+    echo "$(date '+%F %T') ON_ALARM $1"
+    bash -c "$ON_ALARM \"\$1\" \"\$2\"" ipsio-alarm "$1" "${2:-}"
+    rc=$?   # before the $(date) below, which resets $?
+    echo "$(date '+%F %T') ON_ALARM rc=$rc"
+  ) < /dev/null >> "$DIR/alarm.log" 2>&1 &
 }
 
 # ---------------------------------------------------- signal to a panel ---
@@ -481,6 +502,17 @@ signals_pending() { if [ -s "$SIGNAL_Q" ]; then wc -l < "$SIGNAL_Q" | tr -d ' ';
 
 restore_output() { local o; o=$(output_to_restore); [ -n "$o" ] && SwitchAudioSource -t output -s "$o" >/dev/null 2>&1; }
 
+# other_recorders: pids of capture processes that are not Ipsio's recorder: an
+# ffmpeg capturing through avfoundation (the BlackHole or screen device; its
+# argv has indexes, never the device name) or an older recording script
+# (aula-grava.sh). A second reader of the same BlackHole measured -inf (top of
+# this file). ps runs before awk, so the filter never finds itself.
+other_recorders() {
+  local mine all; mine=$(cat "$PIDFILE" 2>/dev/null)
+  all=$(ps -axo pid=,args= 2>/dev/null)
+  printf '%s\n' "$all" | awk -v mine="$mine" '$1 != mine && $0 !~ /list_devices/ && (($0 ~ /ffmpeg/ && $0 ~ /avfoundation/) || $0 ~ /aula-grava/) { printf "%s%s", sep, $1; sep = " " }'
+}
+
 # doctor: checks the whole setup WITHOUT recording and without stopping at the
 # first problem, so a new Mac learns everything that is missing in one pass.
 # Same checks as the start preflight (one source of truth: the same functions
@@ -488,8 +520,11 @@ restore_output() { local o; o=$(output_to_restore); [ -n "$o" ] && SwitchAudioSo
 # Calendar is optional and never counts as missing.
 # The #state line names every item checked, by key: missing=a,b and ok=c,d.
 # The app's setup window draws its checklist from those two lists.
+# warn=a,b names what is worth knowing but never missing (the exit code does
+# not change): automatic login off (after a restart nothing records until
+# someone logs in) and another recorder alive.
 doctor() {
-  local miss="" okk="" out="" VID AUD MICN MICI FREE PERM cal=""
+  local miss="" okk="" out="" VID AUD MICN MICI FREE PERM cal="" warn="" others
   bad() { miss="${miss:+$miss,}$1"; out="$out$(printf 'X   %s' "$(t "$2" "${3:-}" | sed -n 2p)")"$'\n'; }
   good() { okk="${okk:+$okk,}$1"; out="$out$(t doctor_item "$2")"$'\n'; }
   if safe_path "$DIR"; then good dir "$DIR"; else bad dir invalid_dir; fi
@@ -536,8 +571,13 @@ doctor() {
   echo
   printf '%s' "$out"
   if [ -n "$cal" ]; then t doctor_calendar "$cal"; else t doctor_calendar_none; fi
-  if [ -n "$miss" ]; then state verdict=SETUP_INCOMPLETE mode="$MODE" missing="$miss" ok="$okk" calendar="${cal:-none}"; return 1; fi
-  state verdict=SETUP_OK mode="$MODE" missing= ok="$okk" calendar="${cal:-none}"
+  if [ -z "$(defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser 2>/dev/null)" ]; then
+    warn="autologin"; t doctor_no_autologin
+  fi
+  others=$(other_recorders)
+  if [ -n "$others" ]; then warn="${warn:+$warn,}other_recorder"; t doctor_other_recorder "$others"; fi
+  if [ -n "$miss" ]; then state verdict=SETUP_INCOMPLETE mode="$MODE" missing="$miss" ok="$okk" calendar="${cal:-none}" warn="$warn"; return 1; fi
+  state verdict=SETUP_OK mode="$MODE" missing= ok="$okk" calendar="${cal:-none}" warn="$warn"
 }
 
 main() {
@@ -576,6 +616,10 @@ case "$1" in
     SwitchAudioSource -c -t output > "$ORIG_OUTPUT"
     SwitchAudioSource -t output -s "$DEVICE" >/dev/null 2>&1
     rm -f "$LEVEL" "$LEVEL_MIC"
+    # -thread_queue_size 1024 before each avfoundation input: ffmpeg's default
+    # input queue (8 packets) is small for a live device, and when the encoder
+    # lags for a moment avfoundation drops packets ("Thread message queue
+    # blocking"), which is a gap in the screen or the sound.
     METER="asetnsamples=n=48000,astats=metadata=1:reset=10,ametadata=print:key=lavfi.astats.Overall.RMS_level:direct=1:file="
     if [ "$MODE" = "meeting" ]; then
       # Meeting: track 1 = mix (computer + microphone), 2 = computer only (the
@@ -587,14 +631,14 @@ case "$1" in
       # meter reads the COMPUTER branch, never the mix: on the mix, your own
       # voice (or room noise) would hide a silent BlackHole, which is exactly
       # the failure this meter exists to catch.
-      nohup ffmpeg -nostdin -y -f avfoundation -capture_cursor 1 -framerate 12 -i "$VID:$AUD" \
-        -f avfoundation -i ":$MICI" \
+      nohup ffmpeg -nostdin -y -thread_queue_size 1024 -f avfoundation -capture_cursor 1 -framerate 12 -i "$VID:$AUD" \
+        -thread_queue_size 1024 -f avfoundation -i ":$MICI" \
         -filter_complex "[0:a]aresample=48000:async=1000,aformat=channel_layouts=stereo,asplit=3[s1][s2][s3];[1:a]aresample=48000:async=1000,aformat=channel_layouts=stereo,asplit=3[m1][m2][m3];[s1][m1]amix=inputs=2:duration=first:normalize=0[mix];[s3]${METER}${LEVEL}[meto];[m3]${METER}${LEVEL_MIC}[mico]" \
         -map 0:v -map "[mix]" -map "[s2]" -map "[m2]" -c:v h264_videotoolbox -b:v 4M -pix_fmt yuv420p -c:a aac -b:a 128k "$OUT" \
         -map "[meto]" -f null - -map "[mico]" -f null - \
         > "$LOG" 2>&1 &
     else
-      nohup ffmpeg -nostdin -y -f avfoundation -capture_cursor 1 -framerate 12 -i "$VID:$AUD" \
+      nohup ffmpeg -nostdin -y -thread_queue_size 1024 -f avfoundation -capture_cursor 1 -framerate 12 -i "$VID:$AUD" \
         -map 0:v -map 0:a -c:v h264_videotoolbox -b:v 4M -pix_fmt yuv420p -c:a aac -b:a 128k "$OUT" \
         -map 0:a -af "${METER}${LEVEL}" -f null - \
         > "$LOG" 2>&1 &
@@ -728,6 +772,9 @@ case "$1" in
       fi
       if [ -z "$D" ] || awk "BEGIN{exit !(${D:-0} <= 0)}"; then
         rm -f "$FILEREC" "$MODEREC"
+        # A cut file is the one that most needs evidence: the .sha256 and the
+        # hook run on it too (with no duration, so no minutes are reported).
+        after_save "$A" "" "$RMODE"
         t does_not_open "$(basename "$A")" "$(size_of "$A")"; echo ""; t detail "$(t detail_stop "$(SwitchAudioSource -c -t output)")"; state verdict=DOES_NOT_OPEN file="$A"; exit 1
       fi
       # Forget the file once it is dealt with: a second stop (the app runs one
@@ -797,9 +844,15 @@ case "$1" in
   mode) echo "$MODE";;
   microphone) microphone;;
   doctor) doctor; exit $?;;
+  # alarm <reason> [file]: the app's alarm went off; runs ON_ALARM (see on_alarm).
+  alarm)
+    case "${2:-}" in silence|microphone|died) ;; *) echo "usage: ipsio.sh alarm silence|microphone|died [file]"; state verdict=BAD_ALARM; exit 1;; esac
+    on_alarm "$2" "${3:-$(current_file)}"
+    state verdict=ALARM reason="$2" hook="$([ -n "${ON_ALARM:-}" ] && echo 1 || echo 0)"
+    ;;
   # signals: sends what is queued for the office panel, says what is left.
   signals) signal_drain; echo "pending $(signals_pending)"; state signals_pending="$(signals_pending)";;
-  *) echo "usage: ipsio.sh start|level|check|status|stop|test|doctor|signals|folder|title|output|device|language|mode|microphone";;
+  *) echo "usage: ipsio.sh start|level|check|status|stop|test|doctor|alarm|signals|folder|title|output|device|language|mode|microphone";;
 esac
 }
 
