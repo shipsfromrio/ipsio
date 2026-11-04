@@ -20,6 +20,9 @@
 //   stopped by itself (disk full, crash), and the app says so with the log tail;
 // - each of those alarms also runs the ON_ALARM hook from the conf, once per
 //   episode, through "ipsio.sh alarm <silence|microphone|died> <file>";
+//   a calendar meeting that did not start ("not_started") or that passed
+//   while the app was not running ("missed", found by the heartbeat on
+//   launch) runs it too, with the meeting start in place of the file;
 // - on launch, if nothing is recording and the system output was left on
 //   Ipsio's device (app or Mac went down mid-recording), it gives the
 //   speakers back.
@@ -108,6 +111,11 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     var activity: NSObjectProtocol?            // Mac awake with a meeting coming
     var skipPath: String { dir + "/calendar-skip" }
     var markerPath: String { dir + "/calendar-recording" }
+    // Heartbeat (#3): the last time the app was alive, written on the tick.
+    // At launch the gap since it says which meetings nobody recorded.
+    var alivePath: String { dir + "/alive" }
+    var aliveWrittenAt = Date.distantPast
+    var missedItems: [NSMenuItem] = []
 
     // ---- language ----
     var lang: String { Schedule.language(readConf()) }
@@ -150,6 +158,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "next": "Próxima: %@", "recording_calendar": "Gravando da agenda: %@",
             "notif_calendar": "Gravando a reunião", "notif_calendar_body": "%@, até %@. Para pular: Próximas gravações.",
             "calendar_did_not_start": "A reunião \"%@\" não começou a gravar",
+            "missed_title": "Reunião não gravada", "missed_body": "%@, %@: o Mac estava desligado ou sem ninguém logado.",
+            "missed_menu": "Não gravada: %@ · %@",
             "today": "hoje", "tomorrow": "amanhã", "wake_reason": "Ipsio: reunião da agenda chegando",
             "doctor": "Conferir a instalação", "doctor_title": "Instalação",
             "connect": "Conectar agenda…", "connect_again": "Trocar a agenda conectada…",
@@ -231,6 +241,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "next": "Next: %@", "recording_calendar": "Recording from calendar: %@",
             "notif_calendar": "Recording the meeting", "notif_calendar_body": "%@, until %@. To skip: Upcoming recordings.",
             "calendar_did_not_start": "The meeting \"%@\" did not start recording",
+            "missed_title": "Meeting not recorded", "missed_body": "%@, %@: the Mac was off or nobody was logged in.",
+            "missed_menu": "Not recorded: %@ · %@",
             "today": "today", "tomorrow": "tomorrow", "wake_reason": "Ipsio: calendar meeting coming up",
             "doctor": "Check setup", "doctor_title": "Setup",
             "connect": "Connect calendar…", "connect_again": "Replace the connected calendar…",
@@ -341,6 +353,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         restoreSoundIfStuck()
         skipped = Set(((try? String(contentsOfFile: skipPath, encoding: .utf8)) ?? "").components(separatedBy: "\n").filter { !$0.isEmpty })
         meetings = Sources(dir: dir, conf: readConf()).readCache()
+        // #3: read the heartbeat before the first tick rewrites it; report a
+        // little later, when the notification authorization has answered.
+        let lastAlive = readAlive()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.reportMissed(lastAlive) }
         refresh()
         // .common: the timers keep running with a popup open (NSAlert runs the
         // run loop in modal mode, and in the default mode a timer just stops).
@@ -606,6 +622,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     // 3 s timer: watcher + live meter + calendar. Nothing here blocks the UI:
     // whatever calls the script runs off the main thread.
     func tick() {
+        writeAliveIfDue()
         if waitingPermission {
             // The permission came in: only a new process sees it. The
             // LaunchAgent (KeepAlive) reopens the app right away.
@@ -693,6 +710,36 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     func hookAlarm(_ reason: String, file: String? = nil) {
         let f = file ?? currentFile() ?? ""
         DispatchQueue.global().async { _ = self.run("alarm", [reason, f]) }
+    }
+
+    func readAlive() -> Date? {
+        guard let s = try? String(contentsOfFile: alivePath, encoding: .utf8),
+              let v = Double(s.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
+        return Date(timeIntervalSince1970: v)
+    }
+    /// At most every 30 s: the gap the next launch measures is that coarse.
+    func writeAliveIfDue(_ now: Date = Date()) {
+        guard now.timeIntervalSince(aliveWrittenAt) >= 30 else { return }
+        aliveWrittenAt = now
+        try? String(Int(now.timeIntervalSince1970)).write(toFile: alivePath, atomically: true, encoding: .utf8)
+    }
+    /// #3: every calendar meeting whose whole window passed while the app
+    /// was not running becomes a menu line and the ON_ALARM hook ("missed",
+    /// with the meeting start, since there is no file), and all of them one
+    /// notification. Before this, a restart without automatic login lost the
+    /// 08:58 meeting and nothing said so.
+    func reportMissed(_ lastAlive: Date?) {
+        guard calendarAuto else { return }
+        let gone = Schedule.missed(meetings: meetings, lastAlive: lastAlive, now: Date(),
+                                   before: minutes("CALENDAR_BEFORE_MIN", 2), after: minutes("CALENDAR_AFTER_MIN", 5), skipped: skipped)
+        guard !gone.isEmpty else { return }
+        for (i, m) in gone.enumerated() {
+            let line = NSMenuItem(title: t("missed_menu", when(m.start), m.title), action: nil, keyEquivalent: "")
+            line.isEnabled = false
+            menu.insertItem(line, at: 2 + i); missedItems.append(line)
+            hookAlarm("missed", file: Schedule.stamp(m.start))
+        }
+        notify(t("missed_title"), gone.map { t("missed_body", when($0.start), $0.title) }.joined(separator: "\n"))
     }
 
     func logTail() -> String {
@@ -823,6 +870,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
 
     func startCalendar(_ e: Meeting) {
         if !permissionsOk(explain: !failureAlerted.contains(e.id)) {
+            // Nobody may be at the Mac to see the permission popup (#18).
+            if !failureAlerted.contains(e.id) { hookAlarm("not_started", file: Schedule.stamp(e.start)) }
             calendarFailure[e.id] = Date(); failureAlerted.insert(e.id); return
         }
         busy = true; refresh()
@@ -844,6 +893,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
                     self.calendarFailure[e.id] = Date()
                     if !self.failureAlerted.contains(e.id) {
                         self.failureAlerted.insert(e.id)
+                        self.hookAlarm("not_started", file: Schedule.stamp(e.start))
                         self.alert(self.t("calendar_did_not_start", e.title) + ": " + s.title, s.body)
                     }
                 }

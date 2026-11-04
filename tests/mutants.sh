@@ -45,6 +45,12 @@ mutant "the meeting recording is cut by an overlap" 'if now < cur.end { return c
 mutant "a covered invite starts after the call" '$0.id != c && $0.end > cur.end' '$0.id != c'
 mutant "a removed calendar records from the cache" '.filter { c.contains($0.source) }' ''
 mutant "the runner ignores its deadline" 'g.wait(timeout: .now() + limit)' 'g.wait(timeout: .now() + limit * 100)'
+mutant "a missed meeting is never reported" 'guard let last = lastAlive, now > last else { return [] }' 'guard let last = lastAlive, now > last, false else { return [] }'
+mutant "a skipped meeting is reported as missed" '!skipped.contains(m.id) && m.start' 'm.start'
+mutant "a meeting still open is reported as missed" 'm.end.addingTimeInterval(after) <= now' 'm.end <= now.addingTimeInterval(86400)'
+mutant "a meeting open at the last heartbeat is reported" 'm.start.addingTimeInterval(-before) >= last &&' 'm.end.addingTimeInterval(after) >= last &&'
+mutant "missed meetings out of order" '}.sorted { ($0.start, $0.id) < ($1.start, $1.id) }' '}.sorted { ($0.start, $0.id) > ($1.start, $1.id) }'
+mutant "the stamp is not the recording name form" 'f.dateFormat = "yyyy-MM-dd_HH-mm"' 'f.dateFormat = "dd-MM-yyyy_HH-mm"'
 # The native engine: the same idea, one file of app/Engine at a time, against
 # tests/EngineTests.swift.
 engine_mutant() { # <file in app/Engine> <name> <original text> <broken text>

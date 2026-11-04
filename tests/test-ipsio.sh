@@ -294,6 +294,15 @@ run stop >/dev/null; rm -f "$ROOT/alarm-arg"
 run_args alarm died "$ROOT/cut.mkv" >/dev/null
 for _ in $(seq 1 40); do [ -e "$ROOT/alarm-arg" ] && break; sleep 0.5; done
 same "a dead recorder's alarm names the file the app passed" "$(cat "$ROOT/alarm-arg" 2>/dev/null)" "died|$ROOT/cut.mkv"
+# #3 and #18: a meeting that did not start, or passed with the app down, has
+# no file; the hook gets the meeting start instead.
+rm -f "$ROOT/alarm-arg"; run_args alarm missed 2026-10-07_08-58 >/dev/null
+for _ in $(seq 1 40); do [ -e "$ROOT/alarm-arg" ] && break; sleep 0.5; done
+same "a missed meeting reaches the hook with its start" "$(cat "$ROOT/alarm-arg" 2>/dev/null)" "missed|2026-10-07_08-58"
+rm -f "$ROOT/alarm-arg"; run_args alarm not_started 2026-10-07_10-00 >/dev/null
+for _ in $(seq 1 40); do [ -e "$ROOT/alarm-arg" ] && break; sleep 0.5; done
+same "a meeting that did not start reaches the hook" "$(cat "$ROOT/alarm-arg" 2>/dev/null)" "not_started|2026-10-07_10-00"
+has "an unknown alarm is refused" "$(run_args alarm nonsense)" "verdict=BAD_ALARM"
 scenario; conf "ON_ALARM='false'"
 run_args alarm microphone >/dev/null
 for _ in $(seq 1 20); do grep -q 'rc=' "$ROOT/home/.ipsio/alarm.log" 2>/dev/null && break; sleep 0.5; done

@@ -341,8 +341,12 @@ after_save() {
 }
 # on_alarm <reason> [file]: the ON_ALARM hook from the conf. The app calls
 # "ipsio.sh alarm <reason> <file>" once per alarm episode: silence (no computer
-# sound for 90 s), microphone (a dead microphone for 90 s) or died (the
-# recorder stopped by itself). The hook gets the reason as $1 and the
+# sound for 90 s), microphone (a dead microphone for 90 s), died (the
+# recorder stopped by itself), not_started (a calendar meeting did not start
+# recording: permission missing or the start refused) or missed (a calendar
+# meeting passed while the app was not running, #3). For the last two there
+# is no file: $2 is the meeting start, 2026-10-07_08-58, the form recording
+# names begin with. The hook gets the reason as $1 and the
 # recording, when known, as $2 (a phone notification or a page plugs in here:
 # nobody may be at the Mac to see the yellow icon). Same rules as
 # POST_RECORDING: in the background, every descriptor to $DIR/alarm.log with the
@@ -846,7 +850,7 @@ case "$1" in
   doctor) doctor; exit $?;;
   # alarm <reason> [file]: the app's alarm went off; runs ON_ALARM (see on_alarm).
   alarm)
-    case "${2:-}" in silence|microphone|died) ;; *) echo "usage: ipsio.sh alarm silence|microphone|died [file]"; state verdict=BAD_ALARM; exit 1;; esac
+    case "${2:-}" in silence|microphone|died|not_started|missed) ;; *) echo "usage: ipsio.sh alarm silence|microphone|died|not_started|missed [file]"; state verdict=BAD_ALARM; exit 1;; esac
     on_alarm "$2" "${3:-$(current_file)}"
     state verdict=ALARM reason="$2" hook="$([ -n "${ON_ALARM:-}" ] && echo 1 || echo 0)"
     ;;
