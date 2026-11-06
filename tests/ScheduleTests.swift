@@ -328,6 +328,33 @@ struct ScheduleTests {
         check(Schedule.stale(configured: true, lastOk: at("2026-10-05 09:00"), start: t0, now: at("2026-10-05 11:01")), "read 2h01 ago is stale")
         check(!Schedule.stale(configured: true, lastOk: nil, start: t0, now: at("2026-10-05 09:00")), "never read, launched 1 h ago: not yet")
         check(Schedule.stale(configured: true, lastOk: nil, start: t0, now: at("2026-10-05 10:30")), "never read, launched 2h30 ago: stale")
+
+        // ------------------------------------------- missed while not running (#3) ---
+        // The measured case: restart at 03:15, nobody logged in, the 08:58
+        // meeting passed, the app came back at 09:30.
+        let gone = mt("whole", "2026-10-07 08:58", "2026-10-07 09:10")
+        let open = mt("open-now", "2026-10-07 09:20", "2026-10-07 10:00")
+        let cut = mt("open-at-death", "2026-10-07 03:00", "2026-10-07 04:00")
+        let later = mt("later", "2026-10-07 11:00", "2026-10-07 12:00")
+        let allMissed = [later, open, gone, cut]
+        let died = at("2026-10-07 03:15"), backAt = at("2026-10-07 09:30")
+        let ms = Schedule.missed(meetings: allMissed, lastAlive: died, now: backAt, before: 120, after: 300, skipped: [])
+        check(ms.map { $0.id } == ["whole"], "a meeting whose window passed while the app was down is reported, and only it", "\(ms.map { $0.id })")
+        check(Schedule.missed(meetings: allMissed, lastAlive: died, now: backAt, before: 120, after: 300, skipped: ["whole"]).isEmpty,
+              "a skipped meeting is not reported as missed")
+        check(Schedule.missed(meetings: allMissed, lastAlive: nil, now: backAt, before: 120, after: 300, skipped: []).isEmpty,
+              "no heartbeat yet (first launch): nothing reported")
+        check(Schedule.missed(meetings: allMissed, lastAlive: at("2026-10-07 09:29"), now: backAt, before: 120, after: 300, skipped: []).isEmpty,
+              "no gap: nothing reported")
+        check(Schedule.missed(meetings: [gone], lastAlive: died, now: at("2026-10-07 09:12"), before: 120, after: 300, skipped: []).isEmpty,
+              "back inside the after margin: target still records it, not reported")
+        check(Schedule.missed(meetings: [gone], lastAlive: at("2026-10-07 08:57"), now: backAt, before: 120, after: 300, skipped: []).isEmpty,
+              "alive when the window opened (inside the before margin): it was recording, not reported")
+        let two = Schedule.missed(meetings: [later, gone, mt("early", "2026-10-07 07:00", "2026-10-07 07:30")],
+                                  lastAlive: died, now: at("2026-10-07 13:00"), before: 120, after: 300, skipped: [])
+        check(two.map { $0.id } == ["early", "whole", "later"], "several missed meetings come in time order", "\(two.map { $0.id })")
+        check(Schedule.stamp(at("2026-10-07 08:58"), zone: sp) == "2026-10-07_08-58", "the stamp has the form file names begin with",
+              Schedule.stamp(at("2026-10-07 08:58"), zone: sp))
         let sdir = NSTemporaryDirectory() + "ipsio-stale-\(getpid())"
         try? FileManager.default.createDirectory(atPath: sdir, withIntermediateDirectories: true)
         let ss = Sources(dir: sdir, conf: [:])

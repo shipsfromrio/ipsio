@@ -455,6 +455,27 @@ enum Schedule {
         return now.timeIntervalSince(lastOk ?? start) > limit
     }
 
+    /// Meetings the calendar never got to record (#3): every window
+    /// [start - before, end + after) that opened and closed while the app was
+    /// not running, between `lastAlive` (its last heartbeat) and `now`. A
+    /// window already open at `lastAlive` was being recorded, and one still
+    /// open at `now` is started by `target`, so neither is reported here.
+    /// No heartbeat yet (first launch), nothing to say.
+    static func missed(meetings: [Meeting], lastAlive: Date?, now: Date, before: TimeInterval, after: TimeInterval, skipped: Set<String>) -> [Meeting] {
+        guard let last = lastAlive, now > last else { return [] }
+        return meetings.filter { m in
+            !skipped.contains(m.id) && m.start.addingTimeInterval(-before) >= last && m.end.addingTimeInterval(after) <= now
+        }.sorted { ($0.start, $0.id) < ($1.start, $1.id) }
+    }
+
+    /// "2026-10-07_08-58": the start of a recording or meeting in the form the
+    /// file names begin with (ipsio.sh), the only reference an alarm hook gets
+    /// for a meeting that has no file.
+    static func stamp(_ d: Date, zone: TimeZone = .current) -> String {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = zone; f.dateFormat = "yyyy-MM-dd_HH-mm"
+        return f.string(from: d)
+    }
+
     /// One event of the Mac's Calendar app, as plain values: the EventKit
     /// adapter (app/MacCalendar.swift) fills it, and this file stays testable
     /// without EventKit or a permission.
