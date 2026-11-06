@@ -332,26 +332,23 @@ struct ScheduleTests {
         // ------------------------------------------- missed while not running (#3) ---
         // The measured case: restart at 03:15, nobody logged in, the 08:58
         // meeting passed, the app came back at 09:30.
-        func mt(_ id: String, _ a: String, _ b: String) -> Meeting {
-            Meeting(id: id, title: id, start: at(a), end: at(b), link: "", source: "list")
-        }
         let gone = mt("whole", "2026-10-07 08:58", "2026-10-07 09:10")
         let open = mt("open-now", "2026-10-07 09:20", "2026-10-07 10:00")
         let cut = mt("open-at-death", "2026-10-07 03:00", "2026-10-07 04:00")
         let later = mt("later", "2026-10-07 11:00", "2026-10-07 12:00")
-        let all = [later, open, gone, cut]
-        let died = at("2026-10-07 03:15"), back = at("2026-10-07 09:30")
-        let ms = Schedule.missed(meetings: all, lastAlive: died, now: back, before: 120, after: 300, skipped: [])
+        let allMissed = [later, open, gone, cut]
+        let died = at("2026-10-07 03:15"), backAt = at("2026-10-07 09:30")
+        let ms = Schedule.missed(meetings: allMissed, lastAlive: died, now: backAt, before: 120, after: 300, skipped: [])
         check(ms.map { $0.id } == ["whole"], "a meeting whose window passed while the app was down is reported, and only it", "\(ms.map { $0.id })")
-        check(Schedule.missed(meetings: all, lastAlive: died, now: back, before: 120, after: 300, skipped: ["whole"]).isEmpty,
+        check(Schedule.missed(meetings: allMissed, lastAlive: died, now: backAt, before: 120, after: 300, skipped: ["whole"]).isEmpty,
               "a skipped meeting is not reported as missed")
-        check(Schedule.missed(meetings: all, lastAlive: nil, now: back, before: 120, after: 300, skipped: []).isEmpty,
+        check(Schedule.missed(meetings: allMissed, lastAlive: nil, now: backAt, before: 120, after: 300, skipped: []).isEmpty,
               "no heartbeat yet (first launch): nothing reported")
-        check(Schedule.missed(meetings: all, lastAlive: at("2026-10-07 09:29"), now: back, before: 120, after: 300, skipped: []).isEmpty,
+        check(Schedule.missed(meetings: allMissed, lastAlive: at("2026-10-07 09:29"), now: backAt, before: 120, after: 300, skipped: []).isEmpty,
               "no gap: nothing reported")
         check(Schedule.missed(meetings: [gone], lastAlive: died, now: at("2026-10-07 09:12"), before: 120, after: 300, skipped: []).isEmpty,
               "back inside the after margin: target still records it, not reported")
-        check(Schedule.missed(meetings: [gone], lastAlive: at("2026-10-07 08:57"), now: back, before: 120, after: 300, skipped: []).isEmpty,
+        check(Schedule.missed(meetings: [gone], lastAlive: at("2026-10-07 08:57"), now: backAt, before: 120, after: 300, skipped: []).isEmpty,
               "alive when the window opened (inside the before margin): it was recording, not reported")
         let two = Schedule.missed(meetings: [later, gone, mt("early", "2026-10-07 07:00", "2026-10-07 07:30")],
                                   lastAlive: died, now: at("2026-10-07 13:00"), before: 120, after: 300, skipped: [])
