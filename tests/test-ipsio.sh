@@ -587,13 +587,14 @@ grep -q 'perform(#selector(self.runPendingModal)' "$APP" && ok "modal() opens th
 # ------------------------------------------------------------ app alarms ---
 # The app is AppKit and does not build on Linux, so these read its source: the
 # silence alarm fires at 90 s in a row (computer sound and microphone alike),
-# and each alarm, once per episode, hands its reason to ON_ALARM.
+# and each alarm, once per episode, hands its reason to ON_ALARM; so do a
+# calendar meeting that did not start and one missed while the app was down.
 grep -qE '^ +let silenceThreshold = 90$' "$APP" && ok "the silence alarm threshold is 90 s" || fail "the silence alarm threshold is 90 s"
 grep -qF 'let alarm = verdict == "NO_SOUND" && silentSeconds >= silenceThreshold' "$APP" && ok "the sound alarm fires at the threshold, not after it" || fail "the sound alarm fires at the threshold, not after it"
 grep -qF 'let micAlarm = meeting && micSilence >= silenceThreshold' "$APP" && ok "the microphone alarm fires at the threshold" || fail "the microphone alarm fires at the threshold"
 HOOKS=$(awk '/func [A-Za-z]+\(/{ match($0, /func [A-Za-z]+/); f=substr($0, RSTART+5, RLENGTH-5) }
-  /hookAlarm\("/{ match($0, /hookAlarm\("[a-z]+"/); print f ":" substr($0, RSTART+11, RLENGTH-12) }' "$APP" | tr '\n' ' ')
-same "ON_ALARM is called by the watcher and by each level alarm" "$HOOKS" "tick:died applyLevel:silence applyLevel:microphone "
+  /hookAlarm\("/{ match($0, /hookAlarm\("[a-z_]+"/); print f ":" substr($0, RSTART+11, RLENGTH-12) }' "$APP" | tr '\n' ' ')
+same "ON_ALARM is called by the watcher and by each level alarm" "$HOOKS" "tick:died applyLevel:silence applyLevel:microphone reportMissed:missed startCalendar:not_started startCalendar:not_started "
 grep -A2 'if alarm && !alarmGiven {' "$APP" | grep -qF 'hookAlarm("silence")' && ok "the silence hook runs once per episode" || fail "the silence hook runs once per episode"
 grep -A2 'if micAlarm && !micAlarmGiven {' "$APP" | grep -qF 'hookAlarm("microphone")' && ok "the microphone hook runs once per episode" || fail "the microphone hook runs once per episode"
 grep -qF 'DispatchQueue.global().async { _ = self.run("alarm", [reason, f]) }' "$APP" && ok "the alarm hook runs off the main thread" || fail "the alarm hook runs off the main thread"
