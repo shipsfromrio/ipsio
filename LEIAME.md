@@ -121,6 +121,13 @@ uma notificação diz o motivo: reunião marcada depois disso não entraria. Com
 reunião nos próximos 15 minutos o Mac não entra em repouso por
 ociosidade.
 
+Reunião que atrasa não é cortada no fim do convite. Quando a gravação da
+agenda chega ao fim mais o `CALENDAR_AFTER_MIN` e a faixa do computador (não a
+do microfone) teve som nos últimos 2 minutos, ela continua em passos de 5
+minutos, até `CALENDAR_EXTEND_MAX_MIN` (60). Para no primeiro passo que termina
+com 2 minutos de silêncio, quando a próxima reunião começa ou quando alguém
+para. O menu diz `estendida: a reunião ainda tem som`.
+
 Quinze minutos antes de cada reunião da agenda (`CALENDAR_PREFLIGHT_MIN`), o
 app roda as mesmas conferências do `ipsio doctor`, no modo em que a agenda
 grava, mais as duas permissões dele, o disco livre para a reunião inteira
@@ -170,6 +177,7 @@ Mac e a agenda estiverem no mesmo fuso.
 | `CALENDAR_AUTO` | `1` | `0` desliga a gravação automática (a lista continua no menu) |
 | `CALENDAR_BEFORE_MIN` / `CALENDAR_AFTER_MIN` | `2` / `5` | margens de cada reunião |
 | `CALENDAR_PREFLIGHT_MIN` | `15` | minutos antes de cada reunião para a conferência; `0` desliga |
+| `CALENDAR_EXTEND_MAX_MIN` | `60` | quanto a gravação da agenda pode passar da janela enquanto a faixa do computador ainda tem som; `0` desliga |
 | `CALENDAR_MODE` | `meeting` | modo das gravações da agenda |
 | `CALENDAR_ME` | vazio | seu e-mail na agenda, para pular o que você recusou |
 | `CALENDAR_LINK_ONLY` | `1` | `0` grava também evento do iCal sem link |

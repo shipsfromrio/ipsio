@@ -125,6 +125,13 @@ reading, the menu line turns into a warning and a notification says why: a
 meeting added since would be missed. With a meeting in the next 15
 minutes the Mac does not idle-sleep.
 
+A meeting that runs late is not cut at the invite's end. When a calendar
+recording reaches its end plus `CALENDAR_AFTER_MIN` and the computer track
+(not the microphone) had sound in the last 2 minutes, it keeps going in steps
+of 5 minutes, up to `CALENDAR_EXTEND_MAX_MIN` (60). It stops at the first step
+that ends with 2 minutes of silence, when the next meeting starts, or when
+someone stops it. The menu says `extended: the meeting still has sound`.
+
 Fifteen minutes before each calendar meeting (`CALENDAR_PREFLIGHT_MIN`), the
 app runs the same checks as `ipsio doctor`, in the mode the calendar records
 in, plus its own two permissions, free disk for the whole meeting (about 2 GB
@@ -174,6 +181,7 @@ menu. It is right as long as the Mac and the calendar share a time zone.
 | `CALENDAR_AUTO` | `1` | `0` turns automatic recording off (the list stays in the menu) |
 | `CALENDAR_BEFORE_MIN` / `CALENDAR_AFTER_MIN` | `2` / `5` | margins around each meeting |
 | `CALENDAR_PREFLIGHT_MIN` | `15` | minutes before each meeting for the preflight; `0` turns it off |
+| `CALENDAR_EXTEND_MAX_MIN` | `60` | how far past its window a calendar recording may run while the computer track still has sound; `0` turns it off |
 | `CALENDAR_MODE` | `meeting` | mode of calendar recordings |
 | `CALENDAR_ME` | empty | your calendar e-mail, to skip what you declined |
 | `CALENDAR_LINK_ONLY` | `1` | `0` also records iCal events without a link |

@@ -111,6 +111,11 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     var preflightChecked = Set<String>()       // #9: one preflight per meeting
     var preflightRunning = false
     var preflightWarning: (until: Date, at: String)?   // #9: yellow icon until that meeting starts
+    // #6 (R8): the end of the step a calendar recording was extended to, by
+    // meeting id, and the computer track's trailing silence from the last
+    // level reading (nil: not measured yet in this recording).
+    var extendedUntil: [String: Date] = [:]
+    var computerSilence: Int?
     var activity: NSObjectProtocol?            // Mac awake with a meeting coming
     var skipPath: String { dir + "/calendar-skip" }
     var markerPath: String { dir + "/calendar-recording" }
@@ -159,6 +164,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "calendar_reading": "Lendo a agenda…", "calendar_warnings": "%@ aviso(s): rode ipsio-calendar no Terminal",
             "calendar_skipped": "  (pulada)", "calendar_off": "Agenda: gravação automática desligada",
             "next": "Próxima: %@", "recording_calendar": "Gravando da agenda: %@",
+            "calendar_extended": "estendida: a reunião ainda tem som",
             "notif_calendar": "Gravando a reunião", "notif_calendar_body": "%@, até %@. Para pular: Próximas gravações.",
             "calendar_did_not_start": "A reunião \"%@\" não começou a gravar",
             "missed_title": "Reunião não gravada", "missed_body": "%@, %@: o Mac estava desligado ou sem ninguém logado.",
@@ -246,6 +252,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "calendar_reading": "Reading the calendar…", "calendar_warnings": "%@ warning(s): run ipsio-calendar in Terminal",
             "calendar_skipped": "  (skipped)", "calendar_off": "Calendar: automatic recording off",
             "next": "Next: %@", "recording_calendar": "Recording from calendar: %@",
+            "calendar_extended": "extended: the meeting still has sound",
             "notif_calendar": "Recording the meeting", "notif_calendar_body": "%@, until %@. To skip: Upcoming recordings.",
             "calendar_did_not_start": "The meeting \"%@\" did not start recording",
             "missed_title": "Meeting not recorded", "missed_body": "%@, %@: the Mac was off or nobody was logged in.",
@@ -695,6 +702,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         let meeting = s.state["mode"] == "meeting"
         let micSilence = Int(s.state["mic_silence"] ?? "") ?? 0
         let time = s.state["time"] ?? "", size = s.state["size"] ?? "", diskH = s.state["disk_h"] ?? ""
+        // #6: `silence` is the computer meter's trailing silence (the microphone
+        // has its own mic_silence); while measuring it is not known.
+        computerSilence = verdict == "MEASURING" ? nil : Int(s.state["silence"] ?? "")
+        let extended = readMarker().map { extendedUntil[$0.id] != nil } ?? false
         setTooltip(true)
         let alarm = verdict == "NO_SOUND" && silentSeconds >= silenceThreshold
         let micAlarm = meeting && micSilence >= silenceThreshold
@@ -705,7 +716,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             icon("record.circle.fill", color: .systemRed)
             let v = verdict == "MEASURING" ? t("measuring") : t("verdict_" + verdict)
             let disk = diskH.isEmpty ? "" : t("disk", diskH)
-            statusItem.title = [t("recording"), time, size.isEmpty ? "" : size + "B", v, meeting ? "🎙" : "", disk].filter { !$0.isEmpty }.joined(separator: " · ")
+            statusItem.title = [t("recording"), extended ? t("calendar_extended") : "", time, size.isEmpty ? "" : size + "B", v, meeting ? "🎙" : "", disk].filter { !$0.isEmpty }.joined(separator: " · ")
         }
         if verdict != "NO_SOUND" { alarmGiven = false }
         if micSilence == 0 { micAlarmGiven = false }
@@ -866,8 +877,17 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         // A start or stop already in flight (manual or not): decide on the next tick.
         if busy { return }
         if let m = readMarker() {
-            if !recording() { deleteMarker(); return }        // stopped; the next tick decides
-            if target?.id != m.id { stopCalendar(m) }         // ended, skipped, or the next one started
+            if !recording() { deleteMarker(); extendedUntil[m.id] = nil; return }   // stopped (a manual stop wins)
+            if target?.id == m.id { return }
+            // Its window ended and no other meeting takes over: keep going while
+            // the computer track has sound (#6), in steps, up to the cap.
+            if target == nil, let until = Schedule.extend(meeting: meetings.first(where: { $0.id == m.id }), skipped: skipped, now: now,
+                                                         after: minutes("CALENDAR_AFTER_MIN", 5), until: extendedUntil[m.id],
+                                                         computerSilence: computerSilence,
+                                                         maxExtend: minutes("CALENDAR_EXTEND_MAX_MIN", 60)) {
+                extendedUntil[m.id] = until; return
+            }
+            stopCalendar(m)                                    // ended, skipped, or the next one started
             return
         }
         guard !recording(), calendarAuto, let tg = target else { return }
@@ -895,6 +915,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         }
         busy = true; refresh()
         alarmGiven = false; micAlarmGiven = false
+        computerSilence = nil; extendedUntil[e.id] = nil
         let mode = readConf()["CALENDAR_MODE"] == "class" ? "class" : "meeting"
         DispatchQueue.global().async {
             let r = self.run("start", env: ["IPSIO_TITLE": Schedule.fileTitle(e.title), "IPSIO_MODE": mode])
@@ -975,7 +996,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             let r = self.run("stop")
             DispatchQueue.main.async {
                 self.busy = false
-                self.deleteMarker()
+                self.deleteMarker(); self.extendedUntil[m.id] = nil
                 self.showStop(self.parse(r), file: file)
                 self.refresh()
             }

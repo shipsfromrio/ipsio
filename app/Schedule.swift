@@ -511,6 +511,29 @@ enum Schedule {
         return out
     }
 
+    /// #6 (R8): a calendar recording whose window (scheduled end + `after`)
+    /// ended while the COMPUTER track still had sound in the last `quiet`
+    /// seconds keeps going in steps of `step`, up to `maxExtend` past the
+    /// window. Returns the time the recording may run until, or nil to stop
+    /// now. `until` is the end of the step granted before; a step is judged
+    /// only when it ends. The app asks only when no other meeting is the
+    /// target, so the next meeting always takes over (back-to-back rule). A
+    /// skipped or vanished meeting, a window that has not ended (the meeting
+    /// moved), a level not measured yet and `maxExtend` 0 all stop: the
+    /// behaviour before #6.
+    static func extend(meeting: Meeting?, skipped: Set<String>, now: Date, after: TimeInterval, until: Date?,
+                       computerSilence: Int?, maxExtend: TimeInterval, step: TimeInterval = 300, quiet: Int = 120) -> Date? {
+        guard let m = meeting, !skipped.contains(m.id) else { return nil }
+        let windowEnd = m.end.addingTimeInterval(after)
+        guard now >= windowEnd else { return nil }
+        let end = until ?? windowEnd
+        if now < end { return end }
+        guard let s = computerSilence, s < quiet else { return nil }
+        let cap = windowEnd.addingTimeInterval(maxExtend)
+        guard end < cap else { return nil }
+        return min(end.addingTimeInterval(step), cap)
+    }
+
     /// One event of the Mac's Calendar app, as plain values: the EventKit
     /// adapter (app/MacCalendar.swift) fills it, and this file stays testable
     /// without EventKit or a permission.

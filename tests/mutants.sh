@@ -60,6 +60,15 @@ mutant "preflight disk ignores the meeting length" 'if free < floor + hours * gb
 mutant "preflight says the disk twice" 'if !out.contains("disk"), let free' 'if true, let free'
 mutant "preflight ignores a stale calendar" 'if stale { out.append("stale") }' ''
 mutant "preflight is silent when the doctor did not answer" 'else { return ["script"] }' 'else { return [] }'
+mutant "extension ignores the cap" 'guard end < cap else { return nil }' ''
+mutant "extension runs past the cap" 'return min(end.addingTimeInterval(step), cap)' 'return end.addingTimeInterval(step)'
+mutant "extension ignores the silence" 'guard let s = computerSilence, s < quiet else { return nil }' 'guard let s = computerSilence, s < quiet * 100 else { return nil }'
+mutant "extension keeps exactly 2 min of silence" 's < quiet else { return nil }' 's <= quiet else { return nil }'
+mutant "extension without a measured level" 'guard let s = computerSilence, s < quiet else { return nil }' 'let s = computerSilence ?? 0; guard s < quiet else { return nil }'
+mutant "extension of a skipped meeting" 'guard let m = meeting, !skipped.contains(m.id) else { return nil }' 'guard let m = meeting else { return nil }'
+mutant "extension before the window ends" 'guard now >= windowEnd else { return nil }' ''
+mutant "a granted step judged before its end" 'if now < end { return end }' ''
+mutant "extension step doubled" 'return min(end.addingTimeInterval(step), cap)' 'return min(end.addingTimeInterval(step * 2), cap)'
 # The native engine: the same idea, one file of app/Engine at a time, against
 # tests/EngineTests.swift.
 engine_mutant() { # <file in app/Engine> <name> <original text> <broken text>
