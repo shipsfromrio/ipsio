@@ -121,6 +121,15 @@ uma notificação diz o motivo: reunião marcada depois disso não entraria. Com
 reunião nos próximos 15 minutos o Mac não entra em repouso por
 ociosidade.
 
+Quinze minutos antes de cada reunião da agenda (`CALENDAR_PREFLIGHT_MIN`), o
+app roda as mesmas conferências do `ipsio doctor`, no modo em que a agenda
+grava, mais as duas permissões dele, o disco livre para a reunião inteira
+(cerca de 2 GB por hora além do `MIN_FREE_GB`) e a agenda desatualizada. O que
+estiver vermelho vira notificação, o gancho `ON_ALARM` (`preflight`) e o ícone
+amarelo até a reunião, enquanto ainda dá tempo de corrigir; tudo verde não diz
+nada. Sem isso, a recusa só vinha no início, com a pessoa já na chamada. Não
+roda durante uma gravação.
+
 Fontes (pode usar mais de uma; nenhuma credencial fica no código):
 
 | Fonte | Como ligar | O que entra |
@@ -160,6 +169,7 @@ Mac e a agenda estiverem no mesmo fuso.
 | `UI_LANGUAGE` | idioma do sistema | `pt` ou `en` |
 | `CALENDAR_AUTO` | `1` | `0` desliga a gravação automática (a lista continua no menu) |
 | `CALENDAR_BEFORE_MIN` / `CALENDAR_AFTER_MIN` | `2` / `5` | margens de cada reunião |
+| `CALENDAR_PREFLIGHT_MIN` | `15` | minutos antes de cada reunião para a conferência; `0` desliga |
 | `CALENDAR_MODE` | `meeting` | modo das gravações da agenda |
 | `CALENDAR_ME` | vazio | seu e-mail na agenda, para pular o que você recusou |
 | `CALENDAR_LINK_ONLY` | `1` | `0` grava também evento do iCal sem link |
@@ -195,6 +205,9 @@ e a gravação em andamento em `$2`; é por aqui que entra um aviso no celular.
 | `silence` | 90 s seguidos sem som do computador |
 | `microphone` | 90 s seguidos de microfone mudo, no modo reunião |
 | `died` | o gravador parou sozinho (disco cheio, energia, erro) |
+| `not_started` | uma reunião da agenda não começou a gravar (falta permissão, ou o início recusou); `$2` é o início da reunião, `2026-10-07_08-58` |
+| `missed` | uma reunião da agenda passou com o app fora (Mac desligado, reiniciando ou sem ninguém logado); `$2` é o início da reunião |
+| `preflight` | 15 minutos antes de uma reunião da agenda, algo que recusaria ou cortaria a gravação; `$2` é o início da reunião |
 
 Roda em segundo plano, com a saída e o código de saída em
 `~/.ipsio/alarm.log`; um comando que falha não muda nada na gravação. Sem

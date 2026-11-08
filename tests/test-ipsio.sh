@@ -302,6 +302,10 @@ same "a missed meeting reaches the hook with its start" "$(cat "$ROOT/alarm-arg"
 rm -f "$ROOT/alarm-arg"; run_args alarm not_started 2026-10-07_10-00 >/dev/null
 for _ in $(seq 1 40); do [ -e "$ROOT/alarm-arg" ] && break; sleep 0.5; done
 same "a meeting that did not start reaches the hook" "$(cat "$ROOT/alarm-arg" 2>/dev/null)" "not_started|2026-10-07_10-00"
+# #9: a red preflight 15 minutes before a calendar meeting, with its start.
+rm -f "$ROOT/alarm-arg"; run_args alarm preflight 2026-10-07_19-00 >/dev/null
+for _ in $(seq 1 40); do [ -e "$ROOT/alarm-arg" ] && break; sleep 0.5; done
+same "a red preflight reaches the hook with the meeting start" "$(cat "$ROOT/alarm-arg" 2>/dev/null)" "preflight|2026-10-07_19-00"
 has "an unknown alarm is refused" "$(run_args alarm nonsense)" "verdict=BAD_ALARM"
 scenario; conf "ON_ALARM='false'"
 run_args alarm microphone >/dev/null
@@ -522,6 +526,8 @@ has "doctor warns when automatic login is off" "$D" "warn=autologin"
 has "doctor explains the automatic login warning" "$D" "login automático está desligado"
 same "a warning does not make the setup incomplete" "$rc" "0"
 has "a warning is not a missing item" "$D" "verdict=SETUP_OK mode=class missing= "
+# #9: the preflight sizes the disk for the meeting from these two.
+has "doctor reports the free disk and the start's minimum" "$D" "free_gb=500 min_free_gb=20"
 scenario; echo "someone" > "$STUB/autologin"
 lacks "automatic login on, no warning" "$(run doctor)" "autologin"
 printf '4242 /opt/homebrew/bin/ffmpeg -nostdin -f avfoundation -i 1:0 /tmp/x.mkv\n' > "$STUB/ps_list"
@@ -594,7 +600,11 @@ grep -qF 'let alarm = verdict == "NO_SOUND" && silentSeconds >= silenceThreshold
 grep -qF 'let micAlarm = meeting && micSilence >= silenceThreshold' "$APP" && ok "the microphone alarm fires at the threshold" || fail "the microphone alarm fires at the threshold"
 HOOKS=$(awk '/func [A-Za-z]+\(/{ match($0, /func [A-Za-z]+/); f=substr($0, RSTART+5, RLENGTH-5) }
   /hookAlarm\("/{ match($0, /hookAlarm\("[a-z_]+"/); print f ":" substr($0, RSTART+11, RLENGTH-12) }' "$APP" | tr '\n' ' ')
-same "ON_ALARM is called by the watcher and by each level alarm" "$HOOKS" "tick:died applyLevel:silence applyLevel:microphone reportMissed:missed startCalendar:not_started startCalendar:not_started "
+same "ON_ALARM is called by the watcher and by each level alarm" "$HOOKS" "tick:died applyLevel:silence applyLevel:microphone reportMissed:missed startCalendar:not_started startCalendar:not_started preflightCalendar:preflight "
+# #9: the preflight runs on the tick right after the calendar decision, and
+# the doctor it runs is in the mode the calendar records in.
+grep -A1 '^        decideCalendar()$' "$APP" | grep -qF 'preflightCalendar()' && ok "the preflight runs on every tick" || fail "the preflight runs on every tick"
+grep -qF 'self.run("doctor", env: ["IPSIO_MODE": mode])' "$APP" && ok "the preflight doctor runs in the calendar's mode" || fail "the preflight doctor runs in the calendar's mode"
 grep -A2 'if alarm && !alarmGiven {' "$APP" | grep -qF 'hookAlarm("silence")' && ok "the silence hook runs once per episode" || fail "the silence hook runs once per episode"
 grep -A2 'if micAlarm && !micAlarmGiven {' "$APP" | grep -qF 'hookAlarm("microphone")' && ok "the microphone hook runs once per episode" || fail "the microphone hook runs once per episode"
 grep -qF 'DispatchQueue.global().async { _ = self.run("alarm", [reason, f]) }' "$APP" && ok "the alarm hook runs off the main thread" || fail "the alarm hook runs off the main thread"

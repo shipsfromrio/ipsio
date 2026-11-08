@@ -343,9 +343,10 @@ after_save() {
 # "ipsio.sh alarm <reason> <file>" once per alarm episode: silence (no computer
 # sound for 90 s), microphone (a dead microphone for 90 s), died (the
 # recorder stopped by itself), not_started (a calendar meeting did not start
-# recording: permission missing or the start refused) or missed (a calendar
-# meeting passed while the app was not running, #3). For the last two there
-# is no file: $2 is the meeting start, 2026-10-07_08-58, the form recording
+# recording: permission missing or the start refused), missed (a calendar
+# meeting passed while the app was not running, #3) or preflight (15 minutes
+# before a calendar meeting, a check found what would refuse or cut it, #9).
+# For the last three there is no file: $2 is the meeting start, 2026-10-07_08-58, the form recording
 # names begin with. The hook gets the reason as $1 and the
 # recording, when known, as $2 (a phone notification or a page plugs in here:
 # nobody may be at the Mac to see the yellow icon). Same rules as
@@ -526,7 +527,9 @@ other_recorders() {
 # The app's setup window draws its checklist from those two lists.
 # warn=a,b names what is worth knowing but never missing (the exit code does
 # not change): automatic login off (after a restart nothing records until
-# someone logs in) and another recorder alive.
+# someone logs in) and another recorder alive. free_gb= and min_free_gb= give
+# the free space and the start's minimum, so the app's preflight before a
+# calendar meeting (#9) can size the disk for the meeting's length.
 doctor() {
   local miss="" okk="" out="" VID AUD MICN MICI FREE PERM cal="" warn="" others
   bad() { miss="${miss:+$miss,}$1"; out="$out$(printf 'X   %s' "$(t "$2" "${3:-}" | sed -n 2p)")"$'\n'; }
@@ -580,8 +583,8 @@ doctor() {
   fi
   others=$(other_recorders)
   if [ -n "$others" ]; then warn="${warn:+$warn,}other_recorder"; t doctor_other_recorder "$others"; fi
-  if [ -n "$miss" ]; then state verdict=SETUP_INCOMPLETE mode="$MODE" missing="$miss" ok="$okk" calendar="${cal:-none}" warn="$warn"; return 1; fi
-  state verdict=SETUP_OK mode="$MODE" missing= ok="$okk" calendar="${cal:-none}" warn="$warn"
+  if [ -n "$miss" ]; then state verdict=SETUP_INCOMPLETE mode="$MODE" missing="$miss" ok="$okk" calendar="${cal:-none}" warn="$warn" free_gb="${FREE:-}" min_free_gb="$MIN_GB"; return 1; fi
+  state verdict=SETUP_OK mode="$MODE" missing= ok="$okk" calendar="${cal:-none}" warn="$warn" free_gb="${FREE:-}" min_free_gb="$MIN_GB"
 }
 
 main() {
@@ -850,7 +853,7 @@ case "$1" in
   doctor) doctor; exit $?;;
   # alarm <reason> [file]: the app's alarm went off; runs ON_ALARM (see on_alarm).
   alarm)
-    case "${2:-}" in silence|microphone|died|not_started|missed) ;; *) echo "usage: ipsio.sh alarm silence|microphone|died|not_started|missed [file]"; state verdict=BAD_ALARM; exit 1;; esac
+    case "${2:-}" in silence|microphone|died|not_started|missed|preflight) ;; *) echo "usage: ipsio.sh alarm silence|microphone|died|not_started|missed|preflight [file]"; state verdict=BAD_ALARM; exit 1;; esac
     on_alarm "$2" "${3:-$(current_file)}"
     state verdict=ALARM reason="$2" hook="$([ -n "${ON_ALARM:-}" ] && echo 1 || echo 0)"
     ;;

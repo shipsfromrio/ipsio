@@ -476,6 +476,41 @@ enum Schedule {
         return f.string(from: d)
     }
 
+    // =========================================================== preflight ===
+    /// A recording takes about 2 GB per hour (ipsio.sh tells the person the same).
+    static let gbPerHour = 2.0
+
+    /// #9 (R9): the calendar meeting whose preflight is due now: the earliest one
+    /// not skipped and not checked yet that starts within `lead`
+    /// (CALENDAR_PREFLIGHT_MIN, 15 min) while its recording window (start minus
+    /// `before`) is still closed. Once the window opens it is too late to warn:
+    /// the start's own preflight refuses and the not_started alarm speaks. A lead
+    /// at or below `before` (CALENDAR_PREFLIGHT_MIN=0) leaves no window: off.
+    static func preflightDue(now: Date, meetings: [Meeting], skipped: Set<String>, checked: Set<String>,
+                             lead: TimeInterval, before: TimeInterval) -> Meeting? {
+        meetings.filter { m in
+            !skipped.contains(m.id) && !checked.contains(m.id)
+                && now >= m.start.addingTimeInterval(-lead) && now < m.start.addingTimeInterval(-before)
+        }.min { ($0.start, $0.id) < ($1.start, $1.id) }
+    }
+
+    /// What would refuse or cut this meeting's recording, from the doctor's
+    /// #state values: every missing item by its key; "disk" when the free space
+    /// does not cover the whole meeting (2 GB per hour) on top of the minimum the
+    /// start requires; "stale" when the calendar reading is old (a moved or
+    /// cancelled meeting would not be known). A doctor that did not answer is
+    /// "script", never a silent green. Empty: nothing to say.
+    static func preflightProblems(state: [String: String], meeting: Meeting, stale: Bool) -> [String] {
+        guard state["verdict"] == "SETUP_OK" || state["verdict"] == "SETUP_INCOMPLETE" else { return ["script"] }
+        var out = (state["missing"] ?? "").split(separator: ",").map(String.init)
+        if !out.contains("disk"), let free = Double(state["free_gb"] ?? ""), let floor = Double(state["min_free_gb"] ?? "") {
+            let hours = meeting.end.timeIntervalSince(meeting.start) / 3600
+            if free < floor + hours * gbPerHour { out.append("disk") }
+        }
+        if stale { out.append("stale") }
+        return out
+    }
+
     /// One event of the Mac's Calendar app, as plain values: the EventKit
     /// adapter (app/MacCalendar.swift) fills it, and this file stays testable
     /// without EventKit or a permission.

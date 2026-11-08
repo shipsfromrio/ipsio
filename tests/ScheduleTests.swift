@@ -355,6 +355,42 @@ struct ScheduleTests {
         check(two.map { $0.id } == ["early", "whole", "later"], "several missed meetings come in time order", "\(two.map { $0.id })")
         check(Schedule.stamp(at("2026-10-07 08:58"), zone: sp) == "2026-10-07_08-58", "the stamp has the form file names begin with",
               Schedule.stamp(at("2026-10-07 08:58"), zone: sp))
+
+        // ------------------------------------ preflight before the meeting (#9) ---
+        // A three-hour evening meeting: the check is due from 18:45 (15 min
+        // before) until the recording window opens at 18:58 (2 min before).
+        let pfEve = mt("eve", "2026-10-07 19:00", "2026-10-07 22:00")
+        let pfEarly = mt("early", "2026-10-07 18:50", "2026-10-07 19:00")
+        func pfDue(_ t: String, _ ms: [Meeting]? = nil, skip: Set<String> = [], done: Set<String> = [], lead: TimeInterval = 900) -> String {
+            Schedule.preflightDue(now: at(t), meetings: ms ?? [pfEve], skipped: skip, checked: done, lead: lead, before: 120)?.id ?? "-"
+        }
+        check(pfDue("2026-10-07 18:44") == "-", "preflight: before the 15 min lead nothing is due")
+        check(pfDue("2026-10-07 18:45") == "eve", "preflight: due 15 min before the start")
+        check(pfDue("2026-10-07 18:57") == "eve", "preflight: still due just before the recording window opens")
+        check(pfDue("2026-10-07 18:58") == "-", "preflight: once the window opens it is too late (the start speaks)")
+        check(pfDue("2026-10-07 18:50", done: ["eve"]) == "-", "preflight: a meeting already checked is not checked again")
+        check(pfDue("2026-10-07 18:50", skip: ["eve"]) == "-", "preflight: a skipped meeting is not checked")
+        check(pfDue("2026-10-07 18:46", [pfEve, pfEarly]) == "early", "preflight: the earliest meeting first")
+        check(pfDue("2026-10-07 18:50", lead: 0) == "-", "preflight: CALENDAR_PREFLIGHT_MIN=0 turns it off")
+        let pfOk = ["verdict": "SETUP_OK", "missing": "", "free_gb": "500", "min_free_gb": "20"]
+        func pfProbs(_ st: [String: String], _ m: Meeting? = nil, stale: Bool = false) -> [String] {
+            Schedule.preflightProblems(state: st, meeting: m ?? pfEve, stale: stale)
+        }
+        check(pfProbs(pfOk).isEmpty, "preflight: a good Mac is silent")
+        var pfBad = pfOk; pfBad["verdict"] = "SETUP_INCOMPLETE"; pfBad["missing"] = "blackhole,device"
+        check(pfProbs(pfBad) == ["blackhole", "device"], "preflight: every missing item is said", "\(pfProbs(pfBad))")
+        var pfTight = pfOk; pfTight["free_gb"] = "25"
+        check(pfProbs(pfTight) == ["disk"], "preflight: 3 h need 6 GB over the 20 GB minimum, so 25 free is short", "\(pfProbs(pfTight))")
+        pfTight["free_gb"] = "26"
+        check(pfProbs(pfTight).isEmpty, "preflight: 26 GB free covers 3 h over the minimum")
+        pfTight["free_gb"] = "21"
+        check(pfProbs(pfTight, mt("short", "2026-10-07 19:00", "2026-10-07 19:20")).isEmpty, "preflight: a 20 min meeting needs less than 1 GB")
+        var pfFull = pfOk; pfFull["verdict"] = "SETUP_INCOMPLETE"; pfFull["missing"] = "disk"; pfFull["free_gb"] = "3"
+        check(pfProbs(pfFull) == ["disk"], "preflight: a disk the doctor already counts missing is said once", "\(pfProbs(pfFull))")
+        check(pfProbs(pfOk, stale: true) == ["stale"], "preflight: a stale calendar is said")
+        for pfSilent in [[:], ["verdict": "RECORDING"]] as [[String: String]] {
+            check(pfProbs(pfSilent) == ["script"], "preflight: a doctor that did not answer is a problem, never silence", "\(pfProbs(pfSilent))")
+        }
         let sdir = NSTemporaryDirectory() + "ipsio-stale-\(getpid())"
         try? FileManager.default.createDirectory(atPath: sdir, withIntermediateDirectories: true)
         let ss = Sources(dir: sdir, conf: [:])

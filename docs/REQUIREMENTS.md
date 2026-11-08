@@ -19,7 +19,7 @@ stands today, and the bench that proves it or the issue that will.
 | R6 | No lost frames on a Mac under full CPU load | not measured | not measured | [#7](https://github.com/shipsfromrio/ipsio/issues/7) |
 | R7 | The original is evidence: hashed, untouched, start time kept | partial | partial | [#8](https://github.com/shipsfromrio/ipsio/issues/8) |
 | R8 | A meeting that runs late is not cut at the invite's end | missing | missing | [#6](https://github.com/shipsfromrio/ipsio/issues/6) |
-| R9 | What would refuse at the start is said before the meeting | missing | missing | [#9](https://github.com/shipsfromrio/ipsio/issues/9) |
+| R9 | What would refuse at the start is said before the meeting | covered | covered (app side) | `ScheduleTests`, `test-ipsio.sh`; [#9](https://github.com/shipsfromrio/ipsio/issues/9) |
 
 ## R1. A missed calendar recording is never silent
 
@@ -201,8 +201,15 @@ Every item could be checked by the recorder itself. The preflight refuses
 with the reason in words, but for a calendar recording that refusal happens
 when the meeting has already started and the person is in the call.
 
-**Today.** The preflight runs only at `start`; the stale-calendar warning
-(2 h without a full reading) is the one check that runs ahead: #9.
+**Today.** `CALENDAR_PREFLIGHT_MIN` (15) minutes before each calendar
+meeting, the app runs `ipsio doctor` in the calendar's mode and adds its own
+two permissions, the free disk for the meeting's length (2 GB per hour over
+`MIN_FREE_GB`, from the doctor's `free_gb=` and `min_free_gb=`) and a stale
+calendar (`Schedule.preflightDue`, `Schedule.preflightProblems`). Red is a
+notification, the `ON_ALARM` hook with reason `preflight` and a yellow icon
+until the meeting; green is silent. Not measured on a Mac: the notification
+and the icon are app code without a UI bench; what is benched is the pure
+decision and the script side of the hook.
 
 ## Practices that are not code
 

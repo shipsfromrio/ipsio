@@ -125,6 +125,15 @@ reading, the menu line turns into a warning and a notification says why: a
 meeting added since would be missed. With a meeting in the next 15
 minutes the Mac does not idle-sleep.
 
+Fifteen minutes before each calendar meeting (`CALENDAR_PREFLIGHT_MIN`), the
+app runs the same checks as `ipsio doctor`, in the mode the calendar records
+in, plus its own two permissions, free disk for the whole meeting (about 2 GB
+per hour on top of `MIN_FREE_GB`) and a stale calendar. Anything red becomes
+a notification, the `ON_ALARM` hook (`preflight`) and a yellow icon until the
+meeting, while there is still time to fix it; a green result says nothing.
+Without this, the refusal came only at the start, with the person already in
+the call. It does not run while recording.
+
 Sources (you can use more than one; no credential lives in the code):
 
 | Source | How to turn it on | What is kept |
@@ -164,6 +173,7 @@ menu. It is right as long as the Mac and the calendar share a time zone.
 | `UI_LANGUAGE` | system language | `pt` or `en` |
 | `CALENDAR_AUTO` | `1` | `0` turns automatic recording off (the list stays in the menu) |
 | `CALENDAR_BEFORE_MIN` / `CALENDAR_AFTER_MIN` | `2` / `5` | margins around each meeting |
+| `CALENDAR_PREFLIGHT_MIN` | `15` | minutes before each meeting for the preflight; `0` turns it off |
 | `CALENDAR_MODE` | `meeting` | mode of calendar recordings |
 | `CALENDAR_ME` | empty | your calendar e-mail, to skip what you declined |
 | `CALENDAR_LINK_ONLY` | `1` | `0` also records iCal events without a link |
@@ -199,6 +209,9 @@ The yellow icon and the alert only help someone looking at the Mac. If
 | `silence` | 90 s in a row with no computer sound |
 | `microphone` | 90 s in a row of a dead microphone, in meeting mode |
 | `died` | the recorder stopped by itself (disk full, power, error) |
+| `not_started` | a calendar meeting did not start recording (permission missing, or the start refused); `$2` is the meeting start, `2026-10-07_08-58` |
+| `missed` | a calendar meeting passed while the app was not running (the Mac off, restarting, or nobody logged in); `$2` is the meeting start |
+| `preflight` | 15 minutes before a calendar meeting, something that would refuse or cut its recording; `$2` is the meeting start |
 
 It runs in the background, with its output and exit code in
 `~/.ipsio/alarm.log`; a failing command changes nothing in the recording.
