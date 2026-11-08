@@ -92,6 +92,25 @@ PY2
 tooltip_mutant "meeting reads as class" 'if mode == "meeting" { return' 'if mode == "nothing" { return'
 tooltip_mutant "calendar meeting name dropped" '!m.isEmpty {' 'false {'
 tooltip_mutant "idle claims to record" 'guard recording else {' 'guard !recording else {'
+# The setup checklist, against tests/SetupTests.swift.
+setup_mutant() { # <name> <original text> <broken text>
+  python3 - "$ROOT/app/Setup.swift" "$T/Setup.swift" "$2" "$3" <<'PY3' || { echo "ERROR: the snippet for mutant '$1' is no longer in Setup.swift"; ALIVE=$((ALIVE+1)); return; }
+import sys
+src, dst, a, b = sys.argv[1:5]
+s = open(src, encoding="utf-8").read()
+if a not in s: sys.exit(1)
+open(dst, "w", encoding="utf-8").write(s.replace(a, b, 1))
+PY3
+  if ! swiftc -parse-as-library "$T/Setup.swift" "$ROOT/tests/SetupTests.swift" -o "$T/st" 2>"$T/err"; then
+    echo "ERROR: mutant '$1' does not compile"; tail -3 "$T/err"; ALIVE=$((ALIVE+1)); return; fi
+  if "$T/st" >/dev/null 2>&1; then echo "SURVIVED: $1"; ALIVE=$((ALIVE+1)); else echo "killed: $1"; fi
+}
+setup_mutant "automatic login never warns" '!warn.split(separator: ",").contains("autologin")' 'true'
+setup_mutant "automatic login read as one word" '!warn.split(separator: ",").contains("autologin")' 'warn != "autologin"'
+setup_mutant "automatic login blocks setup" 'static let nonBlocking: Set<String> = ["calendar", "autologin"]' 'static let nonBlocking: Set<String> = ["calendar"]'
+setup_mutant "automatic login shown without the calendar" 'if status["calendar"] == true, let warn = state["warn"] {' 'if let warn = state["warn"] {'
+setup_mutant "an older doctor reads as automatic login on" 'if status["calendar"] == true, let warn = state["warn"] {' 'if status["calendar"] == true, let warn = Optional(state["warn"] ?? "") {'
+setup_mutant "the automatic login line is grey" 'alarm: k == "autologin")' 'alarm: false)'
 echo
 [ "$ALIVE" -eq 0 ] && echo "all mutants killed" || echo "$ALIVE mutant(s) alive"
 [ "$ALIVE" -eq 0 ]

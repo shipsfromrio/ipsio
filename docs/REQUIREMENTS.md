@@ -11,7 +11,7 @@ stands today, and the bench that proves it or the issue that will.
 
 | # | Requirement | Script | Engine | Proof or issue |
 |---|---|---|---|---|
-| R1 | A missed calendar recording is never silent | missing | missing | [#3](https://github.com/shipsfromrio/ipsio/issues/3) |
+| R1 | A missed calendar recording is never silent | covered | covered (app side) | `ScheduleTests`, `SetupTests`, `test-ipsio.sh`; [#3](https://github.com/shipsfromrio/ipsio/issues/3) |
 | R2 | The meeting's sound reaches the recorder, or an alarm in 90 s | covered | covered by design | `test-ipsio.sh`, `EngineTests` |
 | R3 | The live meter reads the computer track alone, never the mix | covered | covered | `test-ipsio.sh` (strengthened here) |
 | R4 | Track layout and container are a stable contract | covered | diverges | `test-ipsio.sh`; [#4](https://github.com/shipsfromrio/ipsio/issues/4) |
@@ -36,10 +36,15 @@ someone happened to log in. Nothing in the recorder would have said anything.
 
 **Today.** `Schedule.target()` (`app/Schedule.swift`) starts a meeting that is
 already in progress when the app comes back, so a restart in the middle of a
-meeting is covered. A meeting entirely inside the gap is not reported (#3).
-A `doctor` line for a missing automatic login is in progress in a separate
-change. Ipsio must detect and tell, never change the login setting itself
-(with FileVault on, automatic login is impossible, and the line says so).
+meeting is covered. A meeting entirely inside the gap becomes, at the next
+launch, a notification, a menu line and an `ON_ALARM` run with reason `missed`
+(`Schedule.missed`, from the heartbeat in `~/.ipsio/alive`). `ipsio doctor`
+warns when automatic login is off (`warn=autologin`), and with the calendar on
+the setup window shows it as a red line that does not block setup
+(`Setup.items`, `SetupTests`). Ipsio detects and tells, never changes the login
+setting itself (with FileVault on, automatic login is impossible, and the line
+says so). Both sides run in the app, whatever records: the native engine does
+not change them.
 
 ## R2. The meeting's sound reaches the recorder, or an alarm within 90 s
 

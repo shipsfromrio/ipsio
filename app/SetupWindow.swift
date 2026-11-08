@@ -109,9 +109,12 @@ final class SetupWindow: NSObject, NSWindowDelegate {
     }
 
     private func row(_ item: SetupItem, tag: Int) -> NSView {
-        let symbol = item.ok ? "checkmark.circle.fill" : (item.required ? "xmark.circle.fill" : "circle.dashed")
+        // An alarm item (automatic login) is red like a required one, but it is
+        // not counted in "N items left" and never holds the Test button.
+        let red = item.required || item.alarm
+        let symbol = item.ok ? "checkmark.circle.fill" : (red ? "xmark.circle.fill" : "circle.dashed")
         let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: item.ok ? "OK" : app.t("setup_missing")) ?? NSImage())
-        icon.contentTintColor = item.ok ? .systemGreen : (item.required ? .systemRed : .secondaryLabelColor)
+        icon.contentTintColor = item.ok ? .systemGreen : (red ? .systemRed : .secondaryLabelColor)
         icon.symbolConfiguration = .init(pointSize: 16, weight: .regular)
         icon.setContentHuggingPriority(.required, for: .horizontal)
         let title = NSTextField(labelWithString: app.t("setup_" + item.key, app.deviceName()))

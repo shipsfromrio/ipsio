@@ -78,7 +78,10 @@ desligado (depois de um reinício por atualização ou queda de energia o Mac pa
 na tela de login, e nada grava até alguém entrar) e outro gravador vivo (um
 ffmpeg capturando pelo avfoundation fora do Ipsio, ou um script antigo como o
 `aula-grava.sh`): dois programas lendo o BlackHole ao mesmo tempo podem deixar
-um deles mudo.
+um deles mudo. Com a agenda conectada, a janela de instalação mostra o login
+automático numa linha própria: vermelha quando desligado, sem travar o botão de
+teste, porque com o FileVault ligado ele não tem como ser ligado. O Ipsio só
+avisa; nunca muda a configuração de login.
 
 ## Usar
 

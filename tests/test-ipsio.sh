@@ -608,8 +608,11 @@ same "app texts: no key repeated in pt" "$(printf '%s\n' "$SPT" | uniq -d)" ""
 same "app texts: no key repeated in en" "$(printf '%s\n' "$SEN" | uniq -d)" ""
 same "app texts: the same keys in pt and en" "$SPT" "$SEN"
 [ "$(printf '%s\n' "$SPT" | wc -l)" -gt 80 ] && ok "app text extraction found the dictionaries" || fail "app text extraction found the dictionaries"
-# Every setup item and every fix button has its text.
-for k in $(grep -oE '"(script|dir|ffmpeg|switchaudio|blackhole|device|screen|screen_permission|mic_permission|microphone|folder|disk|calendar)"' "$HERE/../app/Setup.swift" | tr -d '"' | sort -u); do
+# Every setup item and every fix button has its text. The keys come from
+# Setup.order itself: a hand-written list here skipped every item added later.
+SETUP_KEYS=$(sed -n '/static let order = \[/,/\]/p' "$HERE/../app/Setup.swift" | grep -oE '"[a-z_]+"' | tr -d '"' | sort -u)
+[ "$(printf '%s\n' "$SETUP_KEYS" | grep -cxE 'script|calendar|autologin')" -eq 3 ] && ok "setup item extraction read Setup.order" || fail "setup item extraction read Setup.order"
+for k in $SETUP_KEYS; do
   printf '%s\n' "$SPT" | grep -qx "setup_$k" && printf '%s\n' "$SPT" | grep -qx "setup_${k}_hint" || fail "setup item '$k' has a title and a hint"
 done
 ok "every setup item has a title and a hint"
