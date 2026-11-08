@@ -51,6 +51,15 @@ mutant "a meeting still open is reported as missed" 'm.end.addingTimeInterval(af
 mutant "a meeting open at the last heartbeat is reported" 'm.start.addingTimeInterval(-before) >= last &&' 'm.end.addingTimeInterval(after) >= last &&'
 mutant "missed meetings out of order" '}.sorted { ($0.start, $0.id) < ($1.start, $1.id) }' '}.sorted { ($0.start, $0.id) > ($1.start, $1.id) }'
 mutant "the stamp is not the recording name form" 'f.dateFormat = "yyyy-MM-dd_HH-mm"' 'f.dateFormat = "dd-MM-yyyy_HH-mm"'
+mutant "preflight warns only at the start" 'now >= m.start.addingTimeInterval(-lead) &&' 'now >= m.start.addingTimeInterval(-before) &&'
+mutant "preflight still due inside the recording window" 'now < m.start.addingTimeInterval(-before)' 'now < m.end'
+mutant "preflight repeats a checked meeting" '!skipped.contains(m.id) && !checked.contains(m.id)' '!skipped.contains(m.id)'
+mutant "preflight checks a skipped meeting" '!skipped.contains(m.id) && !checked.contains(m.id)' '!checked.contains(m.id)'
+mutant "preflight takes the latest meeting" '}.min { ($0.start, $0.id) < ($1.start, $1.id) }' '}.max { ($0.start, $0.id) < ($1.start, $1.id) }'
+mutant "preflight disk ignores the meeting length" 'if free < floor + hours * gbPerHour {' 'if free < floor {'
+mutant "preflight says the disk twice" 'if !out.contains("disk"), let free' 'if true, let free'
+mutant "preflight ignores a stale calendar" 'if stale { out.append("stale") }' ''
+mutant "preflight is silent when the doctor did not answer" 'else { return ["script"] }' 'else { return [] }'
 # The native engine: the same idea, one file of app/Engine at a time, against
 # tests/EngineTests.swift.
 engine_mutant() { # <file in app/Engine> <name> <original text> <broken text>

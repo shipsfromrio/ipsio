@@ -108,6 +108,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
     var readingCalendar = false
     var calendarFailure: [String: Date] = [:]   // id -> last attempt that failed
     var failureAlerted = Set<String>()         // one popup per meeting that did not start
+    var preflightChecked = Set<String>()       // #9: one preflight per meeting
+    var preflightRunning = false
+    var preflightWarning: (until: Date, at: String)?   // #9: yellow icon until that meeting starts
     var activity: NSObjectProtocol?            // Mac awake with a meeting coming
     var skipPath: String { dir + "/calendar-skip" }
     var markerPath: String { dir + "/calendar-recording" }
@@ -160,6 +163,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "calendar_did_not_start": "A reunião \"%@\" não começou a gravar",
             "missed_title": "Reunião não gravada", "missed_body": "%@, %@: o Mac estava desligado ou sem ninguém logado.",
             "missed_menu": "Não gravada: %@ · %@",
+            "preflight_title": "Reunião das %@ (%@): falta algo para gravar", "preflight_body": "Corrija agora em Conferir a instalação, no menu, antes que a reunião comece.",
+            "preflight_stale": "A agenda não é lida por inteiro há mais de 2 horas", "preflight_disk": "Espaço em disco para a reunião inteira",
+            "preflight_status": "Parado · falta algo para a reunião das %@",
             "today": "hoje", "tomorrow": "amanhã", "wake_reason": "Ipsio: reunião da agenda chegando",
             "doctor": "Conferir a instalação", "doctor_title": "Instalação",
             "connect": "Conectar agenda…", "connect_again": "Trocar a agenda conectada…",
@@ -244,6 +250,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             "calendar_did_not_start": "The meeting \"%@\" did not start recording",
             "missed_title": "Meeting not recorded", "missed_body": "%@, %@: the Mac was off or nobody was logged in.",
             "missed_menu": "Not recorded: %@ · %@",
+            "preflight_title": "Meeting at %@ (%@): something is missing to record", "preflight_body": "Fix it now from Check setup in the menu, before the meeting starts.",
+            "preflight_stale": "The calendar has not been fully read for more than 2 hours", "preflight_disk": "Disk space for the whole meeting",
+            "preflight_status": "Stopped · something is missing for the %@ meeting",
             "today": "today", "tomorrow": "tomorrow", "wake_reason": "Ipsio: calendar meeting coming up",
             "doctor": "Check setup", "doctor_title": "Setup",
             "connect": "Connect calendar…", "connect_again": "Replace the connected calendar…",
@@ -588,8 +597,15 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
         let on = recording()
         setTooltip(on)
         if !on {
-            icon("record.circle", color: nil)
-            statusItem.title = !CGPreflightScreenCaptureAccess() ? t("stopped_no_perm") : (!micOk() ? t("stopped_no_mic") : t("stopped"))
+            // #9: a red preflight keeps the icon yellow until that meeting starts.
+            if let w = preflightWarning, Date() < w.until {
+                icon("exclamationmark.circle", color: .systemYellow)
+                statusItem.title = t("preflight_status", w.at)
+            } else {
+                preflightWarning = nil
+                icon("record.circle", color: nil)
+                statusItem.title = !CGPreflightScreenCaptureAccess() ? t("stopped_no_perm") : (!micOk() ? t("stopped_no_mic") : t("stopped"))
+            }
         }
         recordItem.isEnabled = !on && !busy; stopItem.isEnabled = on && !busy; checkItem.isEnabled = on; testItem.isEnabled = !on && !busy
         recordItem.title = t("record"); stopItem.title = t("stop"); checkItem.title = t("check"); testItem.title = busy && !on ? t("testing") : t("test")
@@ -663,6 +679,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
             return
         }
         decideCalendar()
+        preflightCalendar()
         guard recording(), !readingLevel else { if !recording() { refresh() }; return }
         readingLevel = true
         DispatchQueue.global().async {
@@ -901,6 +918,53 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotifica
                 }
                 self.refresh()
             }
+        }
+    }
+
+    /// #9 (R9): CALENDAR_PREFLIGHT_MIN (15) minutes before each calendar meeting,
+    /// the checks of ipsio doctor in the mode the calendar records in, plus the
+    /// app's own two permissions, the free disk for the meeting's length and a
+    /// stale calendar. Red: a notification, the ON_ALARM hook ("preflight", with
+    /// the meeting start; nobody may be at the Mac) and a yellow icon until the
+    /// meeting. Green: silent. Before this the refusal came only at the start,
+    /// with the person already in the call. Never while recording or busy: the
+    /// doctor's device listings and screenshot would compete with the recorder,
+    /// so it waits for the next tick while the window lasts.
+    func preflightCalendar() {
+        guard calendarAuto, !busy, !recording(), !preflightRunning else { return }
+        let c = readConf()
+        guard let m = Schedule.preflightDue(now: Date(), meetings: meetings, skipped: skipped, checked: preflightChecked,
+                                            lead: minutes("CALENDAR_PREFLIGHT_MIN", 15), before: minutes("CALENDAR_BEFORE_MIN", 2)) else { return }
+        preflightChecked.insert(m.id); preflightRunning = true
+        let mode = c["CALENDAR_MODE"] == "class" ? "class" : "meeting"
+        let stale = Schedule.stale(configured: true, lastOk: Sources(dir: dir, conf: c).readLastOk(), start: appStart, now: Date())
+        DispatchQueue.global().async {
+            let r = self.run("doctor", env: ["IPSIO_MODE": mode])
+            DispatchQueue.main.async {
+                self.preflightRunning = false
+                var problems = Schedule.preflightProblems(state: self.parse(r).state, meeting: m, stale: stale)
+                if !CGPreflightScreenCaptureAccess() && !problems.contains("permission") { problems.append("screen_permission") }
+                if !self.micOk() { problems.append("mic_permission") }
+                guard !problems.isEmpty else { return }
+                self.preflightWarning = (until: m.start, at: self.shortTime(m.start))
+                self.hookAlarm("preflight", file: Schedule.stamp(m.start))
+                self.notify(self.t("preflight_title", self.shortTime(m.start), m.title),
+                            problems.map { self.preflightText($0) }.joined(separator: "\n") + "\n" + self.t("preflight_body"))
+                self.refresh()
+            }
+        }
+    }
+
+    /// One line per preflight problem, with the setup window's own title for
+    /// the item, so the notification and the checklist name it the same way.
+    func preflightText(_ k: String) -> String {
+        switch k {
+        case "stale": return t("preflight_stale")
+        case "disk": return t("preflight_disk")
+        case "permission": return t("setup_screen_permission")
+        default:
+            let s = t("setup_" + k, deviceName())
+            return s == "setup_" + k ? t("setup_other") : s
         }
     }
 
