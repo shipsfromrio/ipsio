@@ -59,6 +59,26 @@ struct SetupTests {
         let n = Setup.items(state: newer, screenPermission: true, micPermission: true)
         check(!Setup.complete(n) && n.contains { $0.key == "other" && !$0.ok }, "a missing item the list does not know is red, not dropped", keys(n))
 
+        // R1 (#3): automatic login, a red line that never blocks, only with the calendar on.
+        let okList = "ok=dir,ffmpeg,blackhole,screen,switchaudio,device,folder,disk,permission"
+        func login(_ calendarAndWarn: String) -> SetupItem? {
+            let s = Setup.parseState("#state verdict=SETUP_OK mode=class missing= \(okList) \(calendarAndWarn)")
+            return Setup.items(state: s, screenPermission: true, micPermission: true).first { $0.key == "autologin" }
+        }
+        let off = Setup.items(state: Setup.parseState("#state verdict=SETUP_OK mode=class missing= \(okList) calendar=ics warn=autologin"),
+                              screenPermission: true, micPermission: true)
+        let al = off.first { $0.key == "autologin" }
+        check(al?.ok == false && al?.alarm == true, "calendar on and automatic login off: a red line", keys(off))
+        check(al?.required == false && Setup.complete(off), "automatic login off never blocks setup (FileVault makes it impossible)")
+        check(al?.fix == SetupFix.none, "automatic login has no button: Ipsio never changes the login setting")
+        check(keys(off).hasSuffix("disk+ autologin- calendar+"), "automatic login sits right before the calendar", keys(off))
+        check(off.filter { $0.alarm }.map { $0.key } == ["autologin"], "only automatic login is an alarm line")
+        check(login("calendar=ics warn=")?.ok == true, "calendar on and no warning: automatic login is green")
+        check(login("calendar=ics warn=other_recorder")?.ok == true, "another warning is not automatic login")
+        check(login("calendar=ics warn=other_recorder,autologin")?.ok == false, "automatic login is found anywhere in the warn list")
+        check(login("calendar=none warn=autologin") == nil, "without the calendar there is no automatic login line")
+        check(login("calendar=ics") == nil, "a doctor that sends no warn= says nothing about automatic login, so no green line")
+
         for bad in ["", "COULD NOT RUN THE SCRIPT\n/x/ipsio.sh: error", "#state verdict=RECORDING file=/a b"] {
             let i = Setup.items(state: Setup.parseState(bad), screenPermission: true, micPermission: true)
             check(i.count == 1 && i[0].key == "script" && !i[0].ok && !Setup.complete(i), "a doctor that did not answer is never green", keys(i))

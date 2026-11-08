@@ -80,7 +80,10 @@ automatic login turned off (after a restart for an update or a power cut the
 Mac waits at the login window, and nothing records until someone logs in) and
 another recorder alive (an ffmpeg capturing through avfoundation outside
 Ipsio, or an older script such as `aula-grava.sh`): two programs reading
-BlackHole at once can leave one of them silent.
+BlackHole at once can leave one of them silent. With the calendar connected,
+the setup window shows the automatic login as a line of its own: red when off,
+without holding the Test button, because with FileVault on it cannot be turned
+on at all. Ipsio only tells; it never changes the login setting.
 
 ## Use
 

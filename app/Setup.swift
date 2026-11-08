@@ -22,12 +22,21 @@ struct SetupItem: Equatable {
     let ok: Bool
     let required: Bool
     let fix: SetupFix
+    /// Red when off, without blocking setup: automatic login (R1). With FileVault
+    /// on, automatic login cannot be turned on, so a blocking item would lock that
+    /// Mac out of setup for good; a grey dashed line would read as "optional" and
+    /// hide the meeting a restart will lose.
+    var alarm: Bool = false
 }
 
 enum Setup {
     /// Display order: what blocks everything else first, the optional calendar last.
     static let order = ["script", "dir", "ffmpeg", "switchaudio", "blackhole", "device", "screen", "other",
-                        "screen_permission", "mic_permission", "microphone", "folder", "disk", "calendar"]
+                        "screen_permission", "mic_permission", "microphone", "folder", "disk", "autologin", "calendar"]
+
+    /// Items that never block setup: the calendar is optional, and automatic
+    /// login is a warning the person may be unable to act on (FileVault).
+    static let nonBlocking: Set<String> = ["calendar", "autologin"]
 
     static func fix(_ key: String) -> SetupFix {
         switch key {
@@ -75,9 +84,17 @@ enum Setup {
         status["screen_permission"] = screenPermission && doctorScreen != false
         status["mic_permission"] = micPermission
         status["calendar"] = (state["calendar"] ?? "none") != "none"
+        // R1 (#3): with the calendar on, a Mac that restarts without automatic
+        // login records nothing until someone logs in. The doctor says so in
+        // warn=; only a doctor that sends warn= at all is believed, because an
+        // older one says nothing about it, and nothing is not green.
+        if status["calendar"] == true, let warn = state["warn"] {
+            status["autologin"] = !warn.split(separator: ",").contains("autologin")
+        }
         var out = order.compactMap { k -> SetupItem? in
             guard let ok = status[k] else { return nil }
-            return SetupItem(key: k, ok: ok, required: k != "calendar", fix: ok ? .none : fix(k))
+            return SetupItem(key: k, ok: ok, required: !nonBlocking.contains(k), fix: ok ? .none : fix(k),
+                             alarm: k == "autologin")
         }
         // Fail closed: a missing item this list does not know yet (a newer
         // doctor) is one red "other" line, never dropped into a green window.
