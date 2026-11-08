@@ -605,6 +605,12 @@ same "ON_ALARM is called by the watcher and by each level alarm" "$HOOKS" "tick:
 # the doctor it runs is in the mode the calendar records in.
 grep -A1 '^        decideCalendar()$' "$APP" | grep -qF 'preflightCalendar()' && ok "the preflight runs on every tick" || fail "the preflight runs on every tick"
 grep -qF 'self.run("doctor", env: ["IPSIO_MODE": mode])' "$APP" && ok "the preflight doctor runs in the calendar's mode" || fail "the preflight doctor runs in the calendar's mode"
+# #6: the extension reads the COMPUTER meter (`silence` of `level`), never the
+# microphone's mic_silence, and is asked only when no other meeting is the
+# target, so the next meeting always takes over.
+grep -qF 'computerSilence = verdict == "MEASURING" ? nil : Int(s.state["silence"] ?? "")' "$APP" && ok "the extension reads the computer track" || fail "the extension reads the computer track"
+grep -qF 'if target == nil, let until = Schedule.extend(' "$APP" && ok "the extension never holds off the next meeting" || fail "the extension never holds off the next meeting"
+grep -qF 'maxExtend: minutes("CALENDAR_EXTEND_MAX_MIN", 60)' "$APP" && ok "the extension cap comes from CALENDAR_EXTEND_MAX_MIN (60)" || fail "the extension cap comes from CALENDAR_EXTEND_MAX_MIN (60)"
 grep -A2 'if alarm && !alarmGiven {' "$APP" | grep -qF 'hookAlarm("silence")' && ok "the silence hook runs once per episode" || fail "the silence hook runs once per episode"
 grep -A2 'if micAlarm && !micAlarmGiven {' "$APP" | grep -qF 'hookAlarm("microphone")' && ok "the microphone hook runs once per episode" || fail "the microphone hook runs once per episode"
 grep -qF 'DispatchQueue.global().async { _ = self.run("alarm", [reason, f]) }' "$APP" && ok "the alarm hook runs off the main thread" || fail "the alarm hook runs off the main thread"

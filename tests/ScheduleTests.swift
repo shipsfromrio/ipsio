@@ -391,6 +391,37 @@ struct ScheduleTests {
         for pfSilent in [[:], ["verdict": "RECORDING"]] as [[String: String]] {
             check(pfProbs(pfSilent) == ["script"], "preflight: a doctor that did not answer is a problem, never silence", "\(pfProbs(pfSilent))")
         }
+
+        // ----------------------------- a meeting that runs late is not cut (#6) ---
+        // 19:00-22:00 with the 5 min margin: the window ends at 22:05, and the
+        // default cap lets it run to 23:05 while the computer track has sound.
+        let exEve = mt("exeve", "2026-10-07 19:00", "2026-10-07 22:00")
+        let exHm = DateFormatter(); exHm.timeZone = sp; exHm.dateFormat = "HH:mm"
+        func exT(_ t: String, until: String? = nil, sil: Int? = 10, skip: Set<String> = [], cap: TimeInterval = 3600, gone: Bool = false) -> String {
+            let r = Schedule.extend(meeting: gone ? nil : exEve, skipped: skip, now: at(t), after: 300, until: until.map { at($0) },
+                                    computerSilence: sil, maxExtend: cap)
+            return r.map { exHm.string(from: $0) } ?? "stop"
+        }
+        check(exT("2026-10-07 22:05") == "22:10", "extend: sound at the end of the window keeps it 5 more minutes", exT("2026-10-07 22:05"))
+        check(exT("2026-10-07 22:05", sil: 130) == "stop", "extend: 2 minutes of silence on the computer track stop it")
+        check(exT("2026-10-07 22:05", sil: 120) == "stop", "extend: exactly 2 minutes of silence already stops it")
+        check(exT("2026-10-07 22:05", sil: 119) == "22:10", "extend: sound 119 s ago still counts")
+        check(exT("2026-10-07 22:07", until: "2026-10-07 22:10", sil: 500) == "22:10", "extend: a granted step runs to its end even if quiet now")
+        check(exT("2026-10-07 22:10", until: "2026-10-07 22:10") == "22:15", "extend: sound at the end of a step grants the next one", exT("2026-10-07 22:10", until: "2026-10-07 22:10"))
+        check(exT("2026-10-07 23:05", until: "2026-10-07 23:05") == "stop", "extend: the cap (60 min past the window) stops it")
+        check(exT("2026-10-07 23:02", until: "2026-10-07 23:02") == "23:05", "extend: the last step ends at the cap, not past it", exT("2026-10-07 23:02", until: "2026-10-07 23:02"))
+        check(exT("2026-10-07 22:05", cap: 0) == "stop", "extend: CALENDAR_EXTEND_MAX_MIN=0 turns it off")
+        check(exT("2026-10-07 22:05", sil: nil) == "stop", "extend: a level not measured yet does not extend")
+        check(exT("2026-10-07 22:05", skip: ["exeve"]) == "stop", "extend: a skipped meeting stops")
+        check(exT("2026-10-07 22:05", gone: true) == "stop", "extend: a meeting gone from the calendar stops")
+        check(exT("2026-10-07 21:30") == "stop", "extend: a window that has not ended (the meeting moved) stops")
+        // The next meeting takes over an extended one: its window opening makes it
+        // the target, and the app asks for an extension only with no target.
+        let exNext = mt("exnext", "2026-10-07 22:10", "2026-10-07 23:00")
+        check(Schedule.target(now: at("2026-10-07 22:08"), meetings: [exEve, exNext], skipped: [], before: 120, after: 300, current: "exeve")?.id == "exnext",
+              "extend: the next meeting takes over while the late one is extended")
+        check(Schedule.target(now: at("2026-10-07 22:06"), meetings: [exEve, exNext], skipped: [], before: 120, after: 300, current: "exeve") == nil,
+              "extend: between the window's end and the next meeting there is no target, so the app may extend")
         let sdir = NSTemporaryDirectory() + "ipsio-stale-\(getpid())"
         try? FileManager.default.createDirectory(atPath: sdir, withIntermediateDirectories: true)
         let ss = Sources(dir: sdir, conf: [:])

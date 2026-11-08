@@ -18,7 +18,7 @@ stands today, and the bench that proves it or the issue that will.
 | R5 | A recording outlives the app and its windows | covered | regresses | [#5](https://github.com/shipsfromrio/ipsio/issues/5) |
 | R6 | No lost frames on a Mac under full CPU load | not measured | not measured | [#7](https://github.com/shipsfromrio/ipsio/issues/7) |
 | R7 | The original is evidence: hashed, untouched, start time kept | partial | partial | [#8](https://github.com/shipsfromrio/ipsio/issues/8) |
-| R8 | A meeting that runs late is not cut at the invite's end | missing | missing | [#6](https://github.com/shipsfromrio/ipsio/issues/6) |
+| R8 | A meeting that runs late is not cut at the invite's end | covered | covered (app side) | `ScheduleTests`, `test-ipsio.sh`; [#6](https://github.com/shipsfromrio/ipsio/issues/6) |
 | R9 | What would refuse at the start is said before the meeting | covered | covered (app side) | `ScheduleTests`, `test-ipsio.sh`; [#9](https://github.com/shipsfromrio/ipsio/issues/9) |
 
 ## R1. A missed calendar recording is never silent
@@ -185,8 +185,15 @@ next meeting takes over or someone stops it.
 and the written instructions for the person attending had to say "if it runs
 late, start another recording from the menu", because nothing else would.
 
-**Today.** The recording stops at the end plus `CALENDAR_AFTER_MIN` (5 min):
-#6.
+**Today.** At the end plus `CALENDAR_AFTER_MIN`, with no other meeting taking
+over, `Schedule.extend` keeps the recording in 5-minute steps while the
+computer meter (`silence` of `ipsio level`, never the microphone's) had sound
+in the last 2 minutes, up to `CALENDAR_EXTEND_MAX_MIN` (60) past the window; a
+step is judged only when it ends. Skipped, vanished or moved meetings and a
+level not measured yet stop, as before. Not measured on a Mac with a real late
+meeting: what is benched is the pure decision and, by reading the source, that
+the app feeds it the computer meter and asks only when nothing else is the
+target.
 
 ## R9. What would refuse at the start is said before the meeting
 
